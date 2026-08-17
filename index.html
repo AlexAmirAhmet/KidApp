@@ -1,0 +1,209 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Учим слова</title>
+<style>
+  :root {
+    --bg1: #ff9a9e;
+    --bg2: #a1c4fd;
+    --card-bg: #ffffff;
+  }
+
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: "Comic Sans MS", "Marker Felt", "Trebuchet MS", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    background-attachment: fixed;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: env(safe-area-inset-top, 16px) 16px 24px;
+    user-select: none;
+  }
+
+  h1 {
+    color: #fff;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+    font-size: clamp(1.6rem, 6vw, 2.4rem);
+    margin: 10px 0 16px;
+    text-align: center;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    width: 100%;
+    max-width: 520px;
+  }
+
+  @media (min-width: 480px) {
+    .grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .card {
+    background: var(--card-bg);
+    border: none;
+    border-radius: 24px;
+    box-shadow: 0 6px 0 rgba(0,0,0,0.15), 0 10px 20px rgba(0,0,0,0.12);
+    padding: 18px 8px;
+    font-size: clamp(2.6rem, 10vw, 3.6rem);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    aspect-ratio: 1 / 1;
+  }
+
+  .card:active {
+    transform: scale(0.9) translateY(4px);
+    box-shadow: 0 2px 0 rgba(0,0,0,0.15), 0 4px 10px rgba(0,0,0,0.12);
+  }
+
+  .card.pop {
+    animation: pop 0.4s ease;
+  }
+
+  @keyframes pop {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.15) rotate(-3deg); }
+    65%  { transform: scale(1.1) rotate(3deg); }
+    100% { transform: scale(1); }
+  }
+
+  .card.c0 { background: #ffe0e6; }
+  .card.c1 { background: #fff4cc; }
+  .card.c2 { background: #d9f7d9; }
+  .card.c3 { background: #d6ecff; }
+  .card.c4 { background: #ffe9cc; }
+  .card.c5 { background: #e3ffd9; }
+  .card.c6 { background: #f0d9ff; }
+  .card.c7 { background: #d9fff5; }
+
+  .word-panel {
+    margin-top: 22px;
+    min-height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 520px;
+  }
+
+  .word {
+    background: rgba(255,255,255,0.95);
+    border-radius: 24px;
+    padding: 14px 36px;
+    color: #ff5b7f;
+    font-size: clamp(2rem, 9vw, 3.4rem);
+    font-weight: bold;
+    text-shadow: 1px 1px 0 rgba(0,0,0,0.05);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    text-align: center;
+    opacity: 0;
+    transform: scale(0.7);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+
+  .word.show {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .hint {
+    color: #fff;
+    opacity: 0.85;
+    margin-top: 10px;
+    font-size: 1rem;
+    text-align: center;
+  }
+</style>
+
+<body>
+  <h1>🌈 Учим слова! 🌈</h1>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="word-panel">
+    <div class="word" id="word"></div>
+  </div>
+  <div class="hint" id="hint">Нажми на картинку 👆</div>
+
+  <script>
+    const items = [
+      { emoji: "🐶", word: "Собака" },
+      { emoji: "🐱", word: "Кошка" },
+      { emoji: "🍎", word: "Яблоко" },
+      { emoji: "🚗", word: "Машина" },
+      { emoji: "☀️", word: "Солнце" },
+      { emoji: "🌳", word: "Дерево" },
+      { emoji: "⚽", word: "Мяч" },
+      { emoji: "🏠", word: "Дом" }
+    ];
+
+    const grid = document.getElementById("grid");
+    const wordEl = document.getElementById("word");
+    const hintEl = document.getElementById("hint");
+
+    items.forEach((item, i) => {
+      const btn = document.createElement("button");
+      btn.className = "card c" + i;
+      btn.textContent = item.emoji;
+      btn.setAttribute("aria-label", item.word);
+      btn.addEventListener("click", () => selectItem(item, btn));
+      grid.appendChild(btn);
+    });
+
+    function selectItem(item, btn) {
+      wordEl.textContent = item.word;
+      wordEl.classList.remove("show");
+      void wordEl.offsetWidth;
+      wordEl.classList.add("show");
+
+      btn.classList.remove("pop");
+      void btn.offsetWidth;
+      btn.classList.add("pop");
+
+      hintEl.textContent = "";
+
+      speak(item.word);
+    }
+
+    let russianVoice = null;
+
+    function pickRussianVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      russianVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith("ru")) || null;
+    }
+
+    if ("speechSynthesis" in window) {
+      pickRussianVoice();
+      window.speechSynthesis.onvoiceschanged = pickRussianVoice;
+    }
+
+    function speak(text) {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "ru-RU";
+      if (russianVoice) utter.voice = russianVoice;
+      utter.rate = 0.85;
+      utter.pitch = 1.1;
+      window.speechSynthesis.speak(utter);
+    }
+  </script>
+</body>
