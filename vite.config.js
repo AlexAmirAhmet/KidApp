@@ -3,7 +3,11 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+// GH_PAGES is set only by the GitHub Pages deploy workflow, since that's the
+// one build target that isn't served from the domain root (Netlify and the
+// Capacitor Android app both need base "/").
 export default defineConfig({
+  base: process.env.GH_PAGES ? "/KidApp/" : "/",
   plugins: [
     react(),
     tailwindcss(),
