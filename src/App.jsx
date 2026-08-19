@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect, createContext, useContext } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -21,6 +21,9 @@ import {
   FolderPlus,
   Target,
   Languages,
+  Sun,
+  Moon,
+  RotateCcw,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -50,7 +53,7 @@ if (typeof window !== "undefined" && !window.storage) {
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`;
 
-const PALETTE = {
+const LIGHT_PALETTE = {
   bg: "#E6EDEE",
   bgGlow: "#F5F9F9",
   chip: "#F0F5F5",
@@ -66,6 +69,45 @@ const PALETTE = {
   waiting: "#7C8C99",
   danger: "#C1502E",
 };
+
+// The original scheme the app started with, before the light redesign —
+// brought back as the dark theme. Card stays light/cream even here, like a
+// physical card on a dark desk.
+const DARK_PALETTE = {
+  bg: "#151A27",
+  bgGlow: "#1C2333",
+  chip: "#232B42",
+  bgDeep: "#23262B",
+  card: "#F5EFE0",
+  cardEdge: "#E3D9BE",
+  ink: "#23262B",
+  mint: "#4FA692",
+  mintDeep: "#2F7864",
+  mustard: "#E3A72E",
+  fadeText: "#8B93A8",
+  cream: "#EFE9DA",
+  waiting: "#6C7A99",
+  danger: "#C1502E",
+};
+
+const ThemeContext = createContext(LIGHT_PALETTE);
+function useTheme() {
+  return useContext(ThemeContext);
+}
+
+function ThemeToggle({ isDark, onToggle, size = 15 }) {
+  const PALETTE = useTheme();
+  return (
+    <button
+      onClick={onToggle}
+      title={isDark ? "Светлая тема" : "Тёмная тема"}
+      className="p-2 rounded-full flex items-center justify-center"
+      style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+    >
+      {isDark ? <Sun size={size} /> : <Moon size={size} />}
+    </button>
+  );
+}
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -176,6 +218,7 @@ function useDecks() {
 
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
 function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp }) {
+  const PALETTE = useTheme();
   const [dy, setDy] = useState(0);
   const [dragging, setDragging] = useState(false);
   const drag = useRef({ startY: 0, startX: 0, suppressClick: false });
@@ -334,6 +377,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
 
 // ---- Reusable structured edit/create form: en (required), ru, tr, note ----
 function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" }) {
+  const PALETTE = useTheme();
   const [en, setEn] = useState(initial?.en || "");
   const [ru, setRu] = useState(initial?.ru || "");
   const [tr, setTr] = useState(initial?.tr || "");
@@ -409,7 +453,10 @@ function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" 
   );
 }
 
-function PracticeView({ deck }) {
+// `resetScopeLabel`, when provided (Focus mode only), shows a "reset all
+// active back to waiting" button scoped to the whole current goal tree.
+function PracticeView({ deck, resetScopeLabel }) {
+  const PALETTE = useTheme();
   const activeItems = deck.items.filter((i) => i.status === "active");
   const [order, setOrder] = useState(activeItems.map((_, i) => i));
   const [pos, setPos] = useState(0);
@@ -417,6 +464,7 @@ function PracticeView({ deck }) {
   const [rotation, setRotation] = useState(-1.5);
   const [showTranscription, setShowTranscription] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     setOrder(deck.items.filter((i) => i.status === "active").map((_, i) => i));
@@ -425,6 +473,37 @@ function PracticeView({ deck }) {
     setEditing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deck.items]);
+
+  const resetAllActive = () => {
+    deck.setItems(deck.items.map((i) => (i.status === "active" ? { ...i, status: "waiting" } : i)));
+    setConfirmReset(false);
+  };
+
+  if (confirmReset) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20 px-6 text-center">
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger, maxWidth: "320px" }}>
+          Обнулить актив {resetScopeLabel}? Все активные карточки вернутся в долгий ящик.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={resetAllActive}
+            className="text-sm px-4 py-2 rounded-full"
+            style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            Да, обнулить
+          </button>
+          <button
+            onClick={() => setConfirmReset(false)}
+            className="text-sm px-4 py-2 rounded-full"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!activeItems.length) {
     return (
@@ -469,14 +548,24 @@ function PracticeView({ deck }) {
 
   return (
     <div className="flex flex-col items-center px-6 py-8">
-      <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
+      <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2 flex-wrap">
         <span
           className="text-sm shrink-0"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}
         >
           {pos + 1} / {order.length}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {resetScopeLabel && (
+            <button
+              onClick={() => setConfirmReset(true)}
+              title="Обнулить активные"
+              className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.fadeText }}
+            >
+              <RotateCcw size={14} /> обнулить активные
+            </button>
+          )}
           <button
             onClick={() => setEditing((e) => !e)}
             title="Редактировать карточку"
@@ -563,6 +652,7 @@ function PracticeView({ deck }) {
 }
 
 function ListView({ deck }) {
+  const PALETTE = useTheme();
   const waiting = deck.items.filter((i) => i.status === "waiting");
   const active = deck.items.filter((i) => i.status === "active");
   const [confirmId, setConfirmId] = useState(null);
@@ -576,6 +666,9 @@ function ListView({ deck }) {
   };
   const moveAllToActive = () => {
     deck.setItems(deck.items.map((i) => (i.status === "waiting" ? { ...i, status: "active" } : i)));
+  };
+  const moveAllToWaiting = () => {
+    deck.setItems(deck.items.map((i) => (i.status === "active" ? { ...i, status: "waiting" } : i)));
   };
 
   const Row = ({ item }) => (
@@ -702,12 +795,23 @@ function ListView({ deck }) {
         </div>
       )}
 
-      <h3
-        className="flex items-center gap-2 mb-3"
-        style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}
-      >
-        <BookOpen size={18} style={{ color: PALETTE.mint }} /> В активной колоде ({active.length})
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3
+          className="flex items-center gap-2"
+          style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}
+        >
+          <BookOpen size={18} style={{ color: PALETTE.mint }} /> В активной колоде ({active.length})
+        </h3>
+        {active.length > 0 && (
+          <button
+            onClick={moveAllToWaiting}
+            className="text-xs px-3 py-1.5 rounded-full"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            всё в долгий ящик
+          </button>
+        )}
+      </div>
       {active.length === 0 ? (
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>
           Пока ничего не выбрано для повторения.
@@ -722,6 +826,7 @@ function ListView({ deck }) {
 // ---- Bulk-add form: one line per card, reused by language decks and by the
 // "add children" / "split" flows in Focus mode ----
 function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долгий ящик" }) {
+  const PALETTE = useTheme();
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
   const lineCount = text
@@ -794,7 +899,8 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
   );
 }
 
-function DeckHome({ deckId, title, deck, onBack, onRename, onDelete }) {
+function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
   const [tab, setTab] = useState("practice");
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(title);
@@ -824,30 +930,33 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete }) {
             <ArrowLeft size={16} /> Дашборд
           </button>
 
-          {!renaming && (
-            <div className="flex items-center gap-2">
-              <h2
-                style={{
-                  fontFamily: "'Fraunces', serif",
-                  fontStyle: "italic",
-                  color: PALETTE.cream,
-                  fontSize: "1.4rem",
-                }}
-              >
-                {title}
-              </h2>
-              <button
-                onClick={() => {
-                  setNameDraft(title);
-                  setRenaming(true);
-                }}
-                title="Переименовать колоду"
-                style={{ color: PALETTE.fadeText }}
-              >
-                <Pencil size={15} />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {!renaming && (
+              <>
+                <h2
+                  style={{
+                    fontFamily: "'Fraunces', serif",
+                    fontStyle: "italic",
+                    color: PALETTE.cream,
+                    fontSize: "1.4rem",
+                  }}
+                >
+                  {title}
+                </h2>
+                <button
+                  onClick={() => {
+                    setNameDraft(title);
+                    setRenaming(true);
+                  }}
+                  title="Переименовать колоду"
+                  style={{ color: PALETTE.fadeText }}
+                >
+                  <Pencil size={15} />
+                </button>
+              </>
+            )}
+            <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+          </div>
         </div>
 
         {renaming && (
@@ -942,8 +1051,10 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete }) {
 }
 
 function CreateTile({ label, placeholder, onCreate, big }) {
+  const PALETTE = useTheme();
   const [creating, setCreating] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const formRef = useRef(null);
 
   const submit = () => {
     if (nameDraft.trim()) {
@@ -953,6 +1064,14 @@ function CreateTile({ label, placeholder, onCreate, big }) {
     }
   };
 
+  const handleFocus = () => {
+    // Give the input+button block room above a mobile keyboard: center it in
+    // the (shrunk) visual viewport rather than leaving it pinned at the edge.
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
   if (!creating) {
     return (
       <button
@@ -960,7 +1079,7 @@ function CreateTile({ label, placeholder, onCreate, big }) {
         className={
           big
             ? "relative rounded-[28px] flex flex-col items-center justify-center gap-3 w-full max-w-xs py-14"
-            : "relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center justify-center gap-2 min-h-[150px]"
+            : "relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center justify-center gap-2 min-h-[172px]"
         }
         style={{ background: "transparent", border: `2px dashed ${PALETTE.cardEdge}` }}
       >
@@ -976,10 +1095,11 @@ function CreateTile({ label, placeholder, onCreate, big }) {
 
   return (
     <div
+      ref={formRef}
       className={
         big
           ? "rounded-[28px] p-4 flex flex-col gap-2 justify-center w-full max-w-xs"
-          : "rounded-[28px] p-4 flex flex-col gap-2 justify-center min-h-[150px]"
+          : "rounded-[28px] p-4 flex flex-col gap-2 justify-center min-h-[172px]"
       }
       style={{ background: PALETTE.card, border: `1px solid ${PALETTE.cardEdge}` }}
     >
@@ -987,11 +1107,12 @@ function CreateTile({ label, placeholder, onCreate, big }) {
         autoFocus
         value={nameDraft}
         onChange={(e) => setNameDraft(e.target.value)}
+        onFocus={handleFocus}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder={placeholder}
         className="rounded-xl px-3 py-2 outline-none text-sm"
         style={{
-          background: PALETTE.chip,
+          background: PALETTE.card,
           color: PALETTE.ink,
           fontFamily: "'IBM Plex Sans', sans-serif",
           border: `1px solid ${PALETTE.cardEdge}`,
@@ -1021,7 +1142,21 @@ function CreateTile({ label, placeholder, onCreate, big }) {
   );
 }
 
+// Fixed-height tile name: clamps to 2 lines with an ellipsis so every grid
+// tile stays the same height regardless of how long the name is.
+function TileName({ children }) {
+  return (
+    <span
+      className="mt-3 text-center line-clamp-2"
+      style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", lineHeight: 1.2, overflow: "hidden" }}
+    >
+      {children}
+    </span>
+  );
+}
+
 function LanguageDashboard({ decks, onOpen, onAddDeck }) {
+  const PALETTE = useTheme();
   const countActive = (d) => d.items.filter((i) => i.status === "active").length;
   const countWaiting = (d) => d.items.filter((i) => i.status === "waiting").length;
 
@@ -1045,8 +1180,9 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
           <button
             key={deck.id}
             onClick={() => onOpen(deck.id)}
-            className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center gap-1 transition-transform hover:-translate-y-1"
+            className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
             style={{
+              height: "182px",
               background: PALETTE.card,
               boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset",
               border: `1px solid ${PALETTE.cardEdge}`,
@@ -1062,14 +1198,9 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
             >
               <Icon size={22} strokeWidth={1.8} style={{ color: iconColor }} />
             </span>
+            <TileName>{deck.name}</TileName>
+            <div className="flex-1" />
             <span
-              className="mt-3 text-center"
-              style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", color: PALETTE.ink, lineHeight: 1.2 }}
-            >
-              {deck.name}
-            </span>
-            <span
-              className="mt-1"
               style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}
             >
               {countActive(deck)} активных
@@ -1206,6 +1337,7 @@ function addAtomsToTree(children, parentId, newAtoms) {
 
 // Small folder/atom row used while browsing a goal's tree
 function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
+  const PALETTE = useTheme();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isCategory = node.type === "category";
   const activeCount = isCategory ? countAtomsByStatus(node, "active") : 0;
@@ -1282,7 +1414,7 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
               {node.status === "waiting" ? <ArrowRightCircle size={20} /> : <ArrowLeftCircle size={20} />}
             </button>
           )}
-          <button onClick={() => onSplit(node.id)} title="Разбить на карточки" className="p-1.5 rounded-full" style={{ color: PALETTE.mintDeep }}>
+          <button onClick={() => onSplit(node.id)} title="Разбить на карточки" className="p-1.5 rounded-full" style={{ color: PALETTE.mint }}>
             <FolderPlus size={18} />
           </button>
           <button onClick={() => setConfirmDelete(true)} title="Удалить" className="p-1.5" style={{ color: "#5B6275" }}>
@@ -1297,6 +1429,7 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
 // Full-screen single atom view: same card mechanics as PracticeView, plus
 // the ability to split this atom into a category right from here.
 function AtomView({ atom, onBack, onSave, onSplit }) {
+  const PALETTE = useTheme();
   const [flipped, setFlipped] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
@@ -1340,7 +1473,7 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
           <button
             onClick={onSplit}
             className="flex items-center gap-2 mt-8 text-sm px-4 py-2 rounded-full"
-            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, background: PALETTE.chip }}
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint, background: PALETTE.chip }}
           >
             <FolderPlus size={16} /> разбить на подкарточки
           </button>
@@ -1350,7 +1483,8 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
   );
 }
 
-function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
+function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
   const [path, setPath] = useState([]); // array of category node ids from the root
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(goal.name);
@@ -1360,7 +1494,6 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
   const [practicing, setPracticing] = useState(false);
 
   const crumbs = [{ id: null, name: goal.name }];
-  let cursor = goal.children;
   for (const id of path) {
     const node = findNodeInTree(goal.children, id);
     if (!node) break;
@@ -1416,12 +1549,13 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
   if (practicing) {
     return (
       <div className="min-h-screen" style={{ background: PALETTE.bg }}>
-        <div className="max-w-md mx-auto w-full px-6 pt-8">
+        <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
           <button onClick={() => setPracticing(false)} className="flex items-center gap-1 text-sm mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
             <ArrowLeft size={16} /> {goal.name}
           </button>
+          <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
         </div>
-        <PracticeView deck={practiceDeck} />
+        <PracticeView deck={practiceDeck} resetScopeLabel={`цели «${goal.name}»`} />
       </div>
     );
   }
@@ -1466,24 +1600,27 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
           <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
             <ArrowLeft size={16} /> Мои цели
           </button>
-          {!renaming && (
-            <div className="flex items-center gap-2">
-              <h2 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.3rem" }}>
-                <Target size={16} style={{ display: "inline", marginRight: 6, color: PALETTE.mustard }} />
-                {goal.name}
-              </h2>
-              <button
-                onClick={() => {
-                  setNameDraft(goal.name);
-                  setRenaming(true);
-                }}
-                title="Переименовать цель"
-                style={{ color: PALETTE.fadeText }}
-              >
-                <Pencil size={15} />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {!renaming && (
+              <>
+                <h2 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.3rem" }}>
+                  <Target size={16} style={{ display: "inline", marginRight: 6, color: PALETTE.mustard }} />
+                  {goal.name}
+                </h2>
+                <button
+                  onClick={() => {
+                    setNameDraft(goal.name);
+                    setRenaming(true);
+                  }}
+                  title="Переименовать цель"
+                  style={{ color: PALETTE.fadeText }}
+                >
+                  <Pencil size={15} />
+                </button>
+              </>
+            )}
+            <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+          </div>
         </div>
 
         {renaming && (
@@ -1559,7 +1696,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
         <button
           onClick={handleAddHere}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2"
-          style={{ background: PALETTE.chip, color: PALETTE.mintDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          style={{ background: PALETTE.chip, color: PALETTE.mint, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
           <Plus size={18} /> Добавить карточки сюда
         </button>
@@ -1589,6 +1726,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
 }
 
 function FocusDashboard({ goals, onOpen, onAddGoal }) {
+  const PALETTE = useTheme();
   const countActive = (g) => g.children.flatMap(collectAtoms).filter((a) => a.status === "active").length;
   const countTotal = (g) => g.children.flatMap(collectAtoms).length;
 
@@ -1609,8 +1747,8 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
         <button
           key={goal.id}
           onClick={() => onOpen(goal.id)}
-          className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center gap-1 transition-transform hover:-translate-y-1"
-          style={{ background: PALETTE.card, boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
+          className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
+          style={{ height: "182px", background: PALETTE.card, boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
         >
           <span
             className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
@@ -1618,10 +1756,9 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
           >
             <Target size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
           </span>
-          <span className="mt-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", color: PALETTE.ink, lineHeight: 1.2 }}>
-            {goal.name}
-          </span>
-          <span className="mt-1" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}>
+          <TileName>{goal.name}</TileName>
+          <div className="flex-1" />
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}>
             {countActive(goal)} активных
           </span>
           <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.7rem", color: PALETTE.waiting }}>
@@ -1635,16 +1772,415 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// App shell — mode switch + routing between the two modes' dashboards
+// PAGES MODE — a flat list of long-form texts, read a page at a time. No
+// active/waiting status, no folders: just paste a text and read it.
+// ════════════════════════════════════════════════════════════════════════
+
+function usePagesTexts() {
+  const [texts, setTexts] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("pages-texts-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setTexts(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setTexts(next);
+    try {
+      await window.storage.set("pages-texts-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const addText = useCallback(
+    (title, body) => {
+      if (!title.trim() || !body.trim()) return;
+      persist([...texts, { id: uid(), title: title.trim(), body: body.trim() }]);
+    },
+    [texts, persist]
+  );
+  const updateText = useCallback(
+    (id, title, body) => {
+      if (!title.trim() || !body.trim()) return;
+      persist(texts.map((t) => (t.id === id ? { ...t, title: title.trim(), body: body.trim() } : t)));
+    },
+    [texts, persist]
+  );
+  const deleteText = useCallback(
+    (id) => {
+      persist(texts.filter((t) => t.id !== id));
+    },
+    [texts, persist]
+  );
+
+  return { texts, addText, updateText, deleteText };
+}
+
+function TextForm({ initial, onSave, onCancel }) {
+  const PALETTE = useTheme();
+  const [title, setTitle] = useState(initial?.title || "");
+  const [body, setBody] = useState(initial?.body || "");
+
+  const fieldStyle = {
+    background: PALETTE.card,
+    color: PALETTE.ink,
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    fontSize: "0.95rem",
+    border: `1px solid ${PALETTE.cardEdge}`,
+  };
+
+  return (
+    <div className="px-6 py-8 max-w-md mx-auto w-full flex flex-col gap-3">
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Название текста"
+        className="rounded-xl px-3 py-2 outline-none"
+        style={fieldStyle}
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Вставь текст целиком — разбивка на страницы произойдёт автоматически"
+        rows={14}
+        className="rounded-xl p-4 outline-none resize-none"
+        style={fieldStyle}
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSave(title, body)}
+          disabled={!title.trim() || !body.trim()}
+          className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Сохранить
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 rounded-full py-2.5 text-sm"
+          style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Отмена
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Splits `body` into pages that actually fit the given element's box, by
+// incrementally growing a hidden same-width/typography measuring node until
+// it overflows, then starting a new page — real layout measurement rather
+// than a guessed character count, so it adapts to any screen/font size.
+function paginateIntoElement(body, measureEl, maxHeight) {
+  const tokens = [];
+  body
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .forEach((para, i) => {
+      if (i > 0) tokens.push({ brk: true });
+      para.split(/\s+/).forEach((w) => w && tokens.push({ text: w }));
+    });
+
+  const pages = [];
+  const mkP = () => {
+    const p = document.createElement("p");
+    p.style.margin = "0 0 1em";
+    return p;
+  };
+  measureEl.innerHTML = "";
+  measureEl.appendChild(mkP());
+  const fits = () => measureEl.scrollHeight <= maxHeight;
+  const closePage = () => {
+    pages.push(measureEl.innerHTML);
+    measureEl.innerHTML = "";
+    measureEl.appendChild(mkP());
+  };
+
+  let i = 0;
+  let guard = 0;
+  const guardLimit = tokens.length * 3 + 10;
+  while (i < tokens.length && guard < guardLimit) {
+    guard++;
+    const tok = tokens[i];
+    if (tok.brk) {
+      measureEl.appendChild(mkP());
+      if (!fits()) {
+        measureEl.removeChild(measureEl.lastElementChild);
+        closePage();
+        continue;
+      }
+      i++;
+      continue;
+    }
+    const lastP = measureEl.lastElementChild;
+    const before = lastP.textContent;
+    lastP.textContent = before ? `${before} ${tok.text}` : tok.text;
+    if (!fits()) {
+      lastP.textContent = before;
+      const isOnlyEmptyParagraph = measureEl.children.length === 1 && !before;
+      if (isOnlyEmptyParagraph) {
+        // a single word taller than the page — place it anyway so we don't spin forever
+        lastP.textContent = tok.text;
+        closePage();
+        i++;
+        continue;
+      }
+      closePage();
+      continue; // retry the same token on the fresh page
+    }
+    i++;
+  }
+  if (measureEl.innerHTML.trim()) pages.push(measureEl.innerHTML);
+  return pages.length ? pages : ["<p></p>"];
+}
+
+function PagesReader({ text, onBack, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const wrapRef = useRef(null);
+  const measureRef = useRef(null);
+  const [pages, setPages] = useState(null);
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setPages(null);
+    setIdx(0);
+  }, [text.id]);
+
+  useLayoutEffect(() => {
+    function recompute() {
+      const wrap = wrapRef.current;
+      const measure = measureRef.current;
+      if (!wrap || !measure) return;
+      const nextPages = paginateIntoElement(text.body, measure, wrap.clientHeight);
+      setPages(nextPages);
+      setIdx((prev) => Math.min(prev, nextPages.length - 1));
+    }
+    recompute();
+    const ro = new ResizeObserver(() => recompute());
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    window.addEventListener("resize", recompute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", recompute);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text.id, text.body]);
+
+  const readingStyle = {
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    fontSize: "1rem",
+    lineHeight: 1.7,
+    color: PALETTE.ink,
+  };
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Тексты
+        </button>
+        <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
+          {text.title}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+
+      <div className="max-w-md mx-auto w-full px-6 flex-1 flex flex-col min-h-0 py-4">
+        <div
+          ref={wrapRef}
+          className="flex-1 min-h-0 rounded-2xl p-6 overflow-hidden"
+          style={{ background: PALETTE.card, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 16px 32px rgba(140,155,165,0.22)" }}
+        >
+          {pages ? (
+            <div style={readingStyle} dangerouslySetInnerHTML={{ __html: pages[idx] }} />
+          ) : (
+            <p style={{ ...readingStyle, color: PALETTE.fadeText }}>Разбиваю на страницы…</p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-center gap-6 py-6 shrink-0">
+          <button
+            onClick={() => setIdx((p) => Math.max(0, p - 1))}
+            disabled={idx === 0}
+            className="rounded-full flex items-center justify-center disabled:opacity-30"
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            aria-label="Предыдущая страница"
+          >
+            <ChevronLeft size={24} strokeWidth={2.5} />
+          </button>
+          <span className="text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}>
+            {pages ? `${idx + 1} / ${pages.length}` : "…"}
+          </span>
+          <button
+            onClick={() => setIdx((p) => Math.min((pages?.length || 1) - 1, p + 1))}
+            disabled={!pages || idx >= pages.length - 1}
+            className="rounded-full flex items-center justify-center disabled:opacity-30"
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            aria-label="Следующая страница"
+          >
+            <ChevronRight size={24} strokeWidth={2.5} />
+          </button>
+        </div>
+      </div>
+
+      {/* Hidden measuring node: identical width/typography to the visible page,
+          used to figure out how much text actually fits before it overflows. */}
+      <div
+        ref={measureRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          transform: "translateX(-200%)",
+          boxSizing: "border-box",
+          width: wrapRef.current ? `${wrapRef.current.clientWidth}px` : "300px",
+          padding: "1.5rem", // matches the visible page's p-6, so the measured text-flow width is identical
+          ...readingStyle,
+          visibility: "hidden",
+        }}
+      />
+    </div>
+  );
+}
+
+// Full-screen create/edit form for a text — mirrors DeckHome/GoalHome: its
+// own screen, no dashboard tagline/mode-switch chrome above it.
+function PagesFormScreen({ initial, onCancel, onSave }) {
+  const PALETTE = useTheme();
+  return (
+    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8">
+        <button
+          onClick={onCancel}
+          className="flex items-center gap-1 text-sm"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+        >
+          <ArrowLeft size={16} /> Отмена
+        </button>
+      </div>
+      <TextForm initial={initial} onCancel={onCancel} onSave={onSave} />
+    </div>
+  );
+}
+
+// The Pages-mode "dashboard": a flat list of texts, rendered under the same
+// tagline/mode-switch chrome as the language/focus dashboards.
+function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
+  const PALETTE = useTheme();
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  return (
+    <div className="w-full max-w-md px-6 pt-8">
+      {texts.length === 0 ? (
+        <div className="flex flex-col items-center gap-6 py-10">
+          <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
+            Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.
+          </p>
+          <button
+            onClick={onCreate}
+            className="flex flex-col items-center justify-center gap-3 w-full max-w-xs py-14 rounded-[28px]"
+            style={{ background: "transparent", border: `2px dashed ${PALETTE.cardEdge}` }}
+          >
+            <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+              <Plus size={24} style={{ color: PALETTE.mustard }} />
+            </span>
+            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>Добавить текст</span>
+          </button>
+        </div>
+      ) : (
+        <>
+          {texts.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
+              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+            >
+              <button onClick={() => onOpen(t.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+                <BookOpen size={18} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
+                <div className="min-w-0">
+                  <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+                    {t.title}
+                  </p>
+                  <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
+                    {t.body.slice(0, 60)}
+                  </p>
+                </div>
+              </button>
+
+              {confirmDeleteId === t.id ? (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      onDelete(t.id);
+                      setConfirmDeleteId(null);
+                    }}
+                    className="text-xs px-2 py-1 rounded-full"
+                    style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Да
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="text-xs px-2 py-1 rounded-full"
+                    style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center shrink-0 gap-1">
+                  <button onClick={() => onEdit(t.id)} title="Редактировать" className="p-1.5" style={{ color: PALETTE.fadeText }}>
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => setConfirmDeleteId(t.id)} title="Удалить" className="p-1.5" style={{ color: "#5B6275" }}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={onCreate}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2 mb-10"
+            style={{ background: PALETTE.chip, color: PALETTE.mint, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            <Plus size={18} /> Добавить текст
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// App shell — theme, mode switch, routing between the three modes
 // ════════════════════════════════════════════════════════════════════════
 
 function ModeSwitch({ mode, onChange }) {
+  const PALETTE = useTheme();
   const options = [
     { key: "language", label: "Изучение языка", Icon: Languages },
     { key: "focus", label: "Мои цели", Icon: Target },
+    { key: "pages", label: "Pages", Icon: BookOpen },
   ];
   return (
-    <div className="flex gap-2 p-1 rounded-full mb-8" style={{ background: PALETTE.chip }}>
+    <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
       {options.map(({ key, label, Icon }) => (
         <button
           key={key}
@@ -1666,16 +2202,25 @@ function ModeSwitch({ mode, onChange }) {
 export default function App() {
   const { decks, setDeckItems, addDeck, renameDeck, deleteDeck } = useDecks();
   const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren } = useGoals();
+  const { texts, addText, updateText, deleteText } = usePagesTexts();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
+  const [openTextId, setOpenTextId] = useState(null);
+  const [pagesCreating, setPagesCreating] = useState(false);
+  const [pagesEditingId, setPagesEditingId] = useState(null);
+  const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && (res.value === "language" || res.value === "focus")) setMode(res.value);
+        if (!cancelled && res && (res.value === "language" || res.value === "focus" || res.value === "pages")) setMode(res.value);
+      } catch (e) {}
+      try {
+        const res = await window.storage.get("theme-v1", false);
+        if (!cancelled && res && (res.value === "dark" || res.value === "light")) setIsDark(res.value === "dark");
       } catch (e) {}
     })();
     return () => {
@@ -1683,9 +2228,22 @@ export default function App() {
     };
   }, []);
 
+  const theme = isDark ? DARK_PALETTE : LIGHT_PALETTE;
+
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme.bg);
+  }, [theme.bg]);
+
   const changeMode = (next) => {
     setMode(next);
     window.storage.set("app-mode-v1", next, false).catch(() => {});
+  };
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    window.storage.set("theme-v1", next ? "dark" : "light", false).catch(() => {});
   };
 
   const openDeck = decks.find((d) => d.id === openDeckId) || null;
@@ -1693,68 +2251,90 @@ export default function App() {
     ? { items: openDeck.items, setItems: (items) => setDeckItems(openDeck.id, items) }
     : null;
   const openGoal = goals.find((g) => g.id === openGoalId) || null;
-
-  if (mode === "language" && openDeck) {
-    return (
-      <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <style>{FONT_IMPORT}</style>
-        <DeckHome
-          deckId={openDeck.id}
-          title={openDeck.name}
-          deck={deckAdapter}
-          onBack={() => setOpenDeckId(null)}
-          onRename={renameDeck}
-          onDelete={(id) => {
-            deleteDeck(id);
-            setOpenDeckId(null);
-          }}
-        />
-      </div>
-    );
-  }
-
-  if (mode === "focus" && openGoal) {
-    return (
-      <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <style>{FONT_IMPORT}</style>
-        <GoalHome
-          goal={openGoal}
-          onBack={() => setOpenGoalId(null)}
-          onRename={renameGoal}
-          onDelete={(id) => {
-            deleteGoal(id);
-            setOpenGoalId(null);
-          }}
-          onSetChildren={setGoalChildren}
-        />
-      </div>
-    );
-  }
+  const openText = texts.find((t) => t.id === openTextId) || null;
+  const editingText = texts.find((t) => t.id === pagesEditingId) || null;
 
   return (
-    <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-      <style>{FONT_IMPORT}</style>
-      <div
-        className="min-h-screen flex flex-col items-center px-6 py-16"
-        style={{ background: `radial-gradient(circle at 50% 0%, ${PALETTE.bgGlow}, ${PALETTE.bg})` }}
-      >
-        <div className="text-center mb-2">
-          <p className="text-sm mb-2 tracking-widest uppercase" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint }}>
-            Карточки для практики
-          </p>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "2.4rem" }}>
-            {mode === "language" ? "Твои колоды" : "Твои цели"}
-          </h1>
-        </div>
+    <ThemeContext.Provider value={theme}>
+      <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
 
-        <ModeSwitch mode={mode} onChange={changeMode} />
-
-        {mode === "language" ? (
-          <LanguageDashboard decks={decks} onOpen={setOpenDeckId} onAddDeck={addDeck} />
+        {mode === "pages" && openText ? (
+          <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
+        ) : mode === "pages" && (pagesCreating || editingText) ? (
+          <PagesFormScreen
+            initial={editingText}
+            onCancel={() => {
+              setPagesCreating(false);
+              setPagesEditingId(null);
+            }}
+            onSave={(title, body) => {
+              if (editingText) updateText(editingText.id, title, body);
+              else addText(title, body);
+              setPagesCreating(false);
+              setPagesEditingId(null);
+            }}
+          />
+        ) : mode === "language" && openDeck ? (
+          <DeckHome
+            deckId={openDeck.id}
+            title={openDeck.name}
+            deck={deckAdapter}
+            onBack={() => setOpenDeckId(null)}
+            onRename={renameDeck}
+            onDelete={(id) => {
+              deleteDeck(id);
+              setOpenDeckId(null);
+            }}
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+          />
+        ) : mode === "focus" && openGoal ? (
+          <GoalHome
+            goal={openGoal}
+            onBack={() => setOpenGoalId(null)}
+            onRename={renameGoal}
+            onDelete={(id) => {
+              deleteGoal(id);
+              setOpenGoalId(null);
+            }}
+            onSetChildren={setGoalChildren}
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+          />
         ) : (
-          <FocusDashboard goals={goals} onOpen={setOpenGoalId} onAddGoal={addGoal} />
+          <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
+            <div className="text-center mb-2">
+              <p className="text-sm mb-2 tracking-widest uppercase" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: theme.mint }}>
+                Small pieces. Big change.
+              </p>
+              <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: theme.cream, fontSize: "2.4rem" }}>
+                {mode === "language" ? "Твои колоды" : mode === "focus" ? "Твои цели" : "Твои тексты"}
+              </h1>
+            </div>
+
+            <div className="w-full flex justify-end max-w-lg">
+              <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
+            </div>
+
+            <ModeSwitch mode={mode} onChange={changeMode} />
+
+            {mode === "language" ? (
+              <LanguageDashboard decks={decks} onOpen={setOpenDeckId} onAddDeck={addDeck} />
+            ) : mode === "focus" ? (
+              <FocusDashboard goals={goals} onOpen={setOpenGoalId} onAddGoal={addGoal} />
+            ) : (
+              <PagesList
+                texts={texts}
+                onOpen={setOpenTextId}
+                onCreate={() => setPagesCreating(true)}
+                onEdit={setPagesEditingId}
+                onDelete={deleteText}
+              />
+            )}
+          </div>
         )}
       </div>
-    </div>
+    </ThemeContext.Provider>
   );
 }
