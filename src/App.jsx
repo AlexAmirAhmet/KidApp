@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft,
+  ArrowUp,
   Shuffle,
   ChevronLeft,
   ChevronRight,
+  ChevronRight as ChevronRightSmall,
   Plus,
   Check,
   Type,
@@ -14,6 +16,11 @@ import {
   BookOpen,
   MessageCircle,
   Library,
+  Pencil,
+  Folder,
+  FolderPlus,
+  Target,
+  Languages,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -64,64 +71,6 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-const DEFAULT_PHRASES = [
-  {
-    id: uid(),
-    en: "How's it going?",
-    ru: "Как дела? (неформально)",
-    tr: "хаузит гоуин",
-    note: "Неформальное приветствие среди друзей, не для деловой переписки",
-    status: "active",
-  },
-  {
-    id: uid(),
-    en: "I couldn't agree more.",
-    ru: "Полностью согласен.",
-    tr: "ай куднт эгри мор",
-    note: "",
-    status: "active",
-  },
-  { id: uid(), en: "It's up to you.", ru: "Решать тебе.", tr: "итс ап ту ю", note: "", status: "active" },
-  {
-    id: uid(),
-    en: "Let me get back to you on that.",
-    ru: "Я вернусь к этому вопросу позже.",
-    tr: "лет ми гет бэк ту ю он зэт",
-    note: "Используется в деловом контексте, когда не готов дать ответ сразу",
-    status: "waiting",
-  },
-  {
-    id: uid(),
-    en: "That rings a bell.",
-    ru: "Это что-то напоминает / знакомо.",
-    tr: "зэт рингз э бэл",
-    note: "",
-    status: "waiting",
-  },
-];
-
-const DEFAULT_WORDS = [
-  {
-    id: uid(),
-    en: "resilient",
-    ru: "стойкий, устойчивый",
-    tr: "ризИльент",
-    note: "Часто про людей и системы — способность быстро восстанавливаться после трудностей",
-    status: "active",
-  },
-  { id: uid(), en: "overwhelmed", ru: "перегруженный, ошеломлённый", tr: "оувеУэлмд", note: "", status: "active" },
-  { id: uid(), en: "assumption", ru: "предположение", tr: "асАмпшн", note: "", status: "active" },
-  { id: uid(), en: "commute", ru: "ездить на работу", tr: "кэмЬют", note: "", status: "waiting" },
-  {
-    id: uid(),
-    en: "worthwhile",
-    ru: "стоящий, оправдывающий усилия",
-    tr: "уорсвАйл",
-    note: "",
-    status: "waiting",
-  },
-];
-
 function parseImport(text) {
   return text
     .split("\n")
@@ -153,40 +102,76 @@ function shuffleArr(arr) {
   return a;
 }
 
-function useDeck(key, defaults) {
-  const [items, setItems] = useState(defaults);
+const DECK_ICONS = [MessageCircle, Library, Layers, BookOpen];
+
+// ════════════════════════════════════════════════════════════════════════
+// LANGUAGE MODE — flat decks of cards. Starts empty; the user creates every
+// deck and card themselves, nothing is preloaded.
+// ════════════════════════════════════════════════════════════════════════
+
+function useDecks() {
+  const [decks, setDecks] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await window.storage.get(key, false);
+        const res = await window.storage.get("decks-v1", false);
         if (!cancelled && res && res.value) {
           const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed) && parsed.length) setItems(parsed);
+          if (Array.isArray(parsed)) setDecks(parsed);
         }
       } catch (e) {
-        // no saved data yet, keep defaults
+        // nothing saved yet — keep the empty start
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, []);
 
-  const persist = useCallback(
-    async (next) => {
-      setItems(next);
-      try {
-        await window.storage.set(key, JSON.stringify(next), false);
-      } catch (e) {
-        console.error("Storage error", e);
-      }
+  const persist = useCallback(async (next) => {
+    setDecks(next);
+    try {
+      await window.storage.set("decks-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const setDeckItems = useCallback(
+    (deckId, items) => {
+      persist(decks.map((d) => (d.id === deckId ? { ...d, items } : d)));
     },
-    [key]
+    [decks, persist]
   );
 
-  return { items, setItems: persist };
+  const addDeck = useCallback(
+    (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      persist([...decks, { id: uid(), name: trimmed, items: [] }]);
+    },
+    [decks, persist]
+  );
+
+  const renameDeck = useCallback(
+    (deckId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      persist(decks.map((d) => (d.id === deckId ? { ...d, name: trimmed } : d)));
+    },
+    [decks, persist]
+  );
+
+  const deleteDeck = useCallback(
+    (deckId) => {
+      persist(decks.filter((d) => d.id !== deckId));
+    },
+    [decks, persist]
+  );
+
+  return { decks, setDeckItems, addDeck, renameDeck, deleteDeck };
 }
 
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
@@ -347,18 +332,97 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
   );
 }
 
-function PracticeView({ title, deck }) {
+// ---- Reusable structured edit/create form: en (required), ru, tr, note ----
+function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" }) {
+  const [en, setEn] = useState(initial?.en || "");
+  const [ru, setRu] = useState(initial?.ru || "");
+  const [tr, setTr] = useState(initial?.tr || "");
+  const [note, setNote] = useState(initial?.note || "");
+
+  const fieldStyle = {
+    background: PALETTE.card,
+    color: PALETTE.ink,
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    fontSize: "0.95rem",
+    border: `1px solid ${PALETTE.cardEdge}`,
+  };
+  const labelStyle = {
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    color: PALETTE.fadeText,
+    fontSize: "0.75rem",
+    letterSpacing: "0.03em",
+  };
+
+  const handleSave = () => {
+    if (!en.trim()) return;
+    onSave({ en: en.trim(), ru: ru.trim(), tr: tr.trim(), note: note.trim() });
+  };
+
+  return (
+    <div className="w-full max-w-md flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>Английский текст *</label>
+        <input
+          autoFocus
+          value={en}
+          onChange={(e) => setEn(e.target.value)}
+          className="rounded-xl px-3 py-2 outline-none"
+          style={fieldStyle}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>Перевод</label>
+        <input value={ru} onChange={(e) => setRu(e.target.value)} className="rounded-xl px-3 py-2 outline-none" style={fieldStyle} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>Транскрипция</label>
+        <input value={tr} onChange={(e) => setTr(e.target.value)} className="rounded-xl px-3 py-2 outline-none" style={fieldStyle} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>Заметка (когда используется)</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          className="rounded-xl px-3 py-2 outline-none resize-none"
+          style={fieldStyle}
+        />
+      </div>
+      <div className="flex gap-2 mt-1">
+        <button
+          onClick={handleSave}
+          disabled={!en.trim()}
+          className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          {saveLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 rounded-full py-2.5 text-sm"
+          style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Отмена
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PracticeView({ deck }) {
   const activeItems = deck.items.filter((i) => i.status === "active");
   const [order, setOrder] = useState(activeItems.map((_, i) => i));
   const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [rotation, setRotation] = useState(-1.5);
   const [showTranscription, setShowTranscription] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     setOrder(deck.items.filter((i) => i.status === "active").map((_, i) => i));
     setPos(0);
     setFlipped(false);
+    setEditing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deck.items]);
 
@@ -381,6 +445,7 @@ function PracticeView({ title, deck }) {
   const goTo = (newPos) => {
     setRotation((Math.random() - 0.5) * 4);
     setFlipped(false);
+    setEditing(false);
     setPos((newPos + order.length) % order.length);
   };
 
@@ -388,6 +453,7 @@ function PracticeView({ title, deck }) {
     setOrder(shuffleArr(order));
     setPos(0);
     setFlipped(false);
+    setEditing(false);
     setRotation((Math.random() - 0.5) * 4);
   };
 
@@ -395,77 +461,103 @@ function PracticeView({ title, deck }) {
     deck.setItems(deck.items.map((i) => (i.id === item.id ? { ...i, status: "waiting" } : i)));
   };
 
+  const saveEdit = (fields) => {
+    deck.setItems(deck.items.map((i) => (i.id === item.id ? { ...i, ...fields } : i)));
+    setEditing(false);
+    setFlipped(false);
+  };
+
   return (
     <div className="flex flex-col items-center px-6 py-8">
-      <div className="w-full max-w-md flex items-center justify-between mb-6">
+      <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
         <span
-          className="text-sm"
+          className="text-sm shrink-0"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}
         >
           {pos + 1} / {order.length}
         </span>
-        <button
-          onClick={() => setShowTranscription((s) => !s)}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
-          style={{
-            fontFamily: "'IBM Plex Sans', sans-serif",
-            background: showTranscription ? PALETTE.mustard : PALETTE.chip,
-            color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText,
-          }}
-        >
-          <Type size={14} /> транскрипция
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditing((e) => !e)}
+            title="Редактировать карточку"
+            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+            style={{
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              background: editing ? PALETTE.mustard : PALETTE.chip,
+              color: editing ? PALETTE.bgDeep : PALETTE.fadeText,
+            }}
+          >
+            <Pencil size={14} /> редактировать
+          </button>
+          <button
+            onClick={() => setShowTranscription((s) => !s)}
+            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+            style={{
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              background: showTranscription ? PALETTE.mustard : PALETTE.chip,
+              color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText,
+            }}
+          >
+            <Type size={14} /> транскрипция
+          </button>
+        </div>
       </div>
 
-      <IndexCard
-        key={item.id}
-        item={item}
-        flipped={flipped}
-        onFlip={() => setFlipped((f) => !f)}
-        rotation={rotation}
-        showTranscription={showTranscription}
-        onSwipeUp={moveCurrentToWaiting}
-      />
+      {editing ? (
+        <CardForm initial={item} onSave={saveEdit} onCancel={() => setEditing(false)} />
+      ) : (
+        <>
+          <IndexCard
+            key={item.id}
+            item={item}
+            flipped={flipped}
+            onFlip={() => setFlipped((f) => !f)}
+            rotation={rotation}
+            showTranscription={showTranscription}
+            onSwipeUp={moveCurrentToWaiting}
+          />
 
-      <div className="flex items-center gap-6 mt-10">
-        <button
-          onClick={() => goTo(pos - 1)}
-          className="rounded-full flex items-center justify-center"
-          style={{
-            width: "56px",
-            height: "56px",
-            background: PALETTE.mustard,
-            color: PALETTE.bgDeep,
-            boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
-          }}
-          aria-label="Предыдущая"
-        >
-          <ChevronLeft size={28} strokeWidth={2.5} />
-        </button>
+          <div className="flex items-center gap-6 mt-10">
+            <button
+              onClick={() => goTo(pos - 1)}
+              className="rounded-full flex items-center justify-center"
+              style={{
+                width: "56px",
+                height: "56px",
+                background: PALETTE.mustard,
+                color: PALETTE.bgDeep,
+                boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
+              }}
+              aria-label="Предыдущая"
+            >
+              <ChevronLeft size={28} strokeWidth={2.5} />
+            </button>
 
-        <button
-          onClick={() => goTo(pos + 1)}
-          className="rounded-full flex items-center justify-center"
-          style={{
-            width: "56px",
-            height: "56px",
-            background: PALETTE.mustard,
-            color: PALETTE.bgDeep,
-            boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
-          }}
-          aria-label="Следующая"
-        >
-          <ChevronRight size={28} strokeWidth={2.5} />
-        </button>
-      </div>
+            <button
+              onClick={() => goTo(pos + 1)}
+              className="rounded-full flex items-center justify-center"
+              style={{
+                width: "56px",
+                height: "56px",
+                background: PALETTE.mustard,
+                color: PALETTE.bgDeep,
+                boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
+              }}
+              aria-label="Следующая"
+            >
+              <ChevronRight size={28} strokeWidth={2.5} />
+            </button>
+          </div>
 
-      <button
-        onClick={handleShuffle}
-        className="flex items-center gap-2 mt-6 text-sm"
-        style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
-      >
-        <Shuffle size={15} /> перемешать колоду
-      </button>
+          <button
+            onClick={handleShuffle}
+            className="flex items-center gap-2 mt-6 text-sm"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+          >
+            <Shuffle size={15} /> перемешать колоду
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -627,7 +719,9 @@ function ListView({ deck }) {
   );
 }
 
-function ImportView({ title, deck, onDone }) {
+// ---- Bulk-add form: one line per card, reused by language decks and by the
+// "add children" / "split" flows in Focus mode ----
+function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долгий ящик" }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
   const lineCount = text
@@ -635,14 +729,14 @@ function ImportView({ title, deck, onDone }) {
     .map((l) => l.trim())
     .filter(Boolean).length;
 
-  const handleSave = async () => {
+  const handleSave = () => {
     const parsed = parseImport(text);
     if (!parsed.length) return;
-    await deck.setItems([...deck.items, ...parsed]);
+    onAdd(parsed);
     setSaved(true);
     setText("");
     setTimeout(() => setSaved(false), 1500);
-    setTimeout(() => onDone(), 900);
+    setTimeout(() => onDone && onDone(), 900);
   };
 
   return (
@@ -659,9 +753,8 @@ function ImportView({ title, deck, onDone }) {
       </p>
       <p className="text-sm mb-5 mt-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
         Формат одной строки:{" "}
-        <span style={{ color: PALETTE.mustard }}>english - перевод - транскрипция - когда используется</span>.
-        Обязательно только английское слово или фраза, остальное — по желанию. Новые карточки сразу попадают в
-        долгий ящик — перенеси их в актив, когда будешь готов.
+        <span style={{ color: PALETTE.mustard }}>текст - перевод - транскрипция - заметка</span>.
+        Обязательно только первое поле, остальное — по желанию.
       </p>
 
       <textarea
@@ -695,18 +788,17 @@ function ImportView({ title, deck, onDone }) {
         style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
       >
         {saved ? <Check size={18} /> : <Plus size={18} />}
-        {saved
-          ? "Добавлено в долгий ящик"
-          : lineCount > 1
-          ? `Добавить ${lineCount} карточек в долгий ящик`
-          : "Добавить в долгий ящик"}
+        {saved ? "Добавлено" : lineCount > 1 ? `Добавить ${lineCount} карточек` : doneLabel}
       </button>
     </div>
   );
 }
 
-function DeckHome({ title, deck, onBack }) {
+function DeckHome({ deckId, title, deck, onBack, onRename, onDelete }) {
   const [tab, setTab] = useState("practice");
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(title);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const waitingCount = deck.items.filter((i) => i.status === "waiting").length;
 
   const tabs = [
@@ -715,10 +807,15 @@ function DeckHome({ title, deck, onBack }) {
     { key: "add", label: "Добавить" },
   ];
 
+  const saveRename = () => {
+    if (nameDraft.trim()) onRename(deckId, nameDraft);
+    setRenaming(false);
+  };
+
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2">
           <button
             onClick={onBack}
             className="flex items-center gap-1 text-sm"
@@ -726,10 +823,63 @@ function DeckHome({ title, deck, onBack }) {
           >
             <ArrowLeft size={16} /> Дашборд
           </button>
-          <h2 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.4rem" }}>
-            {title}
-          </h2>
+
+          {!renaming && (
+            <div className="flex items-center gap-2">
+              <h2
+                style={{
+                  fontFamily: "'Fraunces', serif",
+                  fontStyle: "italic",
+                  color: PALETTE.cream,
+                  fontSize: "1.4rem",
+                }}
+              >
+                {title}
+              </h2>
+              <button
+                onClick={() => {
+                  setNameDraft(title);
+                  setRenaming(true);
+                }}
+                title="Переименовать колоду"
+                style={{ color: PALETTE.fadeText }}
+              >
+                <Pencil size={15} />
+              </button>
+            </div>
+          )}
         </div>
+
+        {renaming && (
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              className="flex-1 rounded-xl px-3 py-2 outline-none"
+              style={{
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                border: `1px solid ${PALETTE.cardEdge}`,
+              }}
+            />
+            <button
+              onClick={saveRename}
+              className="px-3 py-2 rounded-xl text-sm"
+              style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Сохранить
+            </button>
+            <button
+              onClick={() => setRenaming(false)}
+              className="px-3 py-2 rounded-xl text-sm"
+              style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Отмена
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-2 mb-2">
           {tabs.map((t) => (
@@ -749,50 +899,153 @@ function DeckHome({ title, deck, onBack }) {
         </div>
       </div>
 
-      {tab === "practice" && <PracticeView title={title} deck={deck} />}
+      {tab === "practice" && <PracticeView deck={deck} />}
       {tab === "list" && <ListView deck={deck} />}
-      {tab === "add" && <ImportView title={title} deck={deck} onDone={() => setTab("list")} />}
+      {tab === "add" && <BulkAddForm onAdd={(items) => deck.setItems([...deck.items, ...items])} onDone={() => setTab("list")} />}
+
+      <div className="max-w-md mx-auto w-full px-6 pb-10 pt-2">
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="text-xs"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}
+          >
+            Удалить колоду «{title}»
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}
+            >
+              Удалить колоду «{title}» навсегда, вместе со всеми карточками?
+            </span>
+            <button
+              onClick={() => onDelete(deckId)}
+              className="text-xs px-3 py-1.5 rounded-full shrink-0"
+              style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Да
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="text-xs px-3 py-1.5 rounded-full shrink-0"
+              style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Отмена
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Dashboard({ phrasesDeck, wordsDeck, onOpen }) {
-  const countActive = (d) => d.items.filter((i) => i.status === "active").length;
-  const countWaiting = (d) => d.items.filter((i) => i.status === "waiting").length;
+function CreateTile({ label, placeholder, onCreate, big }) {
+  const [creating, setCreating] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+
+  const submit = () => {
+    if (nameDraft.trim()) {
+      onCreate(nameDraft);
+      setNameDraft("");
+      setCreating(false);
+    }
+  };
+
+  if (!creating) {
+    return (
+      <button
+        onClick={() => setCreating(true)}
+        className={
+          big
+            ? "relative rounded-[28px] flex flex-col items-center justify-center gap-3 w-full max-w-xs py-14"
+            : "relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center justify-center gap-2 min-h-[150px]"
+        }
+        style={{ background: "transparent", border: `2px dashed ${PALETTE.cardEdge}` }}
+      >
+        <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+          <Plus size={24} style={{ color: PALETTE.mustard }} />
+        </span>
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>
+          {label}
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center px-6 py-16 gap-10"
-      style={{ background: `radial-gradient(circle at 50% 0%, ${PALETTE.bgGlow}, ${PALETTE.bg})` }}
+      className={
+        big
+          ? "rounded-[28px] p-4 flex flex-col gap-2 justify-center w-full max-w-xs"
+          : "rounded-[28px] p-4 flex flex-col gap-2 justify-center min-h-[150px]"
+      }
+      style={{ background: PALETTE.card, border: `1px solid ${PALETTE.cardEdge}` }}
     >
-      <div className="text-center">
-        <p
-          className="text-sm mb-2 tracking-widest uppercase"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint }}
+      <input
+        autoFocus
+        value={nameDraft}
+        onChange={(e) => setNameDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        placeholder={placeholder}
+        className="rounded-xl px-3 py-2 outline-none text-sm"
+        style={{
+          background: PALETTE.chip,
+          color: PALETTE.ink,
+          fontFamily: "'IBM Plex Sans', sans-serif",
+          border: `1px solid ${PALETTE.cardEdge}`,
+        }}
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={submit}
+          disabled={!nameDraft.trim()}
+          className="flex-1 rounded-xl py-2 text-sm disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Карточки для практики
-        </p>
-        <h1
-          style={{
-            fontFamily: "'Fraunces', serif",
-            fontStyle: "italic",
-            color: PALETTE.cream,
-            fontSize: "2.4rem",
+          Создать
+        </button>
+        <button
+          onClick={() => {
+            setCreating(false);
+            setNameDraft("");
           }}
+          className="flex-1 rounded-xl py-2 text-sm"
+          style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Твой English deck
-        </h1>
+          Отмена
+        </button>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex flex-col sm:flex-row gap-10 w-full max-w-lg pt-8">
-        {[
-          { key: "phrases", label: "Фразы", deck: phrasesDeck, Icon: MessageCircle, iconColor: PALETTE.mustard },
-          { key: "words", label: "Слова", deck: wordsDeck, Icon: Library, iconColor: PALETTE.ink },
-        ].map(({ key, label, deck, Icon, iconColor }) => (
+function LanguageDashboard({ decks, onOpen, onAddDeck }) {
+  const countActive = (d) => d.items.filter((i) => i.status === "active").length;
+  const countWaiting = (d) => d.items.filter((i) => i.status === "waiting").length;
+
+  if (decks.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-16">
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
+          Колод пока нет. Создай первую, чтобы начать добавлять карточки.
+        </p>
+        <CreateTile label="Создать колоду" placeholder="Название колоды" onCreate={onAddDeck} big />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
+      {decks.map((deck, i) => {
+        const Icon = DECK_ICONS[i % DECK_ICONS.length];
+        const iconColor = i % 2 === 0 ? PALETTE.mustard : PALETTE.ink;
+        return (
           <button
-            key={key}
-            onClick={() => onOpen(key)}
-            className="relative flex-1 rounded-[28px] pt-12 pb-8 px-6 flex flex-col items-center gap-1 transition-transform hover:-translate-y-1"
+            key={deck.id}
+            onClick={() => onOpen(deck.id)}
+            className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center gap-1 transition-transform hover:-translate-y-1"
             style={{
               background: PALETTE.card,
               boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset",
@@ -800,53 +1053,708 @@ function Dashboard({ phrasesDeck, wordsDeck, onOpen }) {
             }}
           >
             <span
-              className="absolute -top-8 w-16 h-16 rounded-full flex items-center justify-center"
+              className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
               style={{
                 background: PALETTE.card,
                 boxShadow: "0 10px 20px rgba(140,155,165,0.32), 0 2px 0 rgba(255,255,255,0.8) inset",
                 border: `1px solid ${PALETTE.cardEdge}`,
               }}
             >
-              <Icon size={26} strokeWidth={1.8} style={{ color: iconColor }} />
+              <Icon size={22} strokeWidth={1.8} style={{ color: iconColor }} />
             </span>
-
             <span
-              className="mt-3"
-              style={{ fontFamily: "'Fraunces', serif", fontSize: "1.6rem", color: PALETTE.ink }}
+              className="mt-3 text-center"
+              style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", color: PALETTE.ink, lineHeight: 1.2 }}
             >
-              {label}
+              {deck.name}
             </span>
             <span
               className="mt-1"
-              style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.85rem", color: PALETTE.mintDeep }}
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}
             >
               {countActive(deck)} активных
             </span>
-            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem", color: PALETTE.waiting }}>
+            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.7rem", color: PALETTE.waiting }}>
               {countWaiting(deck)} в долгом ящике
             </span>
           </button>
-        ))}
+        );
+      })}
+      <CreateTile label="Новая колода" placeholder="Название колоды" onCreate={onAddDeck} />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// FOCUS MODE — "Мои цели": a tree per goal (categories → … → atoms). Atoms
+// reuse the exact same card mechanics as the language mode (IndexCard,
+// CardForm, flip/swipe/edit). Starts empty, same as language mode.
+// ════════════════════════════════════════════════════════════════════════
+
+function useGoals() {
+  const [goals, setGoals] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("goals-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setGoals(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet — keep the empty start
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setGoals(next);
+    try {
+      await window.storage.set("goals-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const addGoal = useCallback(
+    (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      persist([...goals, { id: uid(), name: trimmed, children: [] }]);
+    },
+    [goals, persist]
+  );
+
+  const renameGoal = useCallback(
+    (goalId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      persist(goals.map((g) => (g.id === goalId ? { ...g, name: trimmed } : g)));
+    },
+    [goals, persist]
+  );
+
+  const deleteGoal = useCallback(
+    (goalId) => {
+      persist(goals.filter((g) => g.id !== goalId));
+    },
+    [goals, persist]
+  );
+
+  const setGoalChildren = useCallback(
+    (goalId, children) => {
+      persist(goals.map((g) => (g.id === goalId ? { ...g, children } : g)));
+    },
+    [goals, persist]
+  );
+
+  return { goals, addGoal, renameGoal, deleteGoal, setGoalChildren };
+}
+
+function collectAtoms(node) {
+  if (node.type === "atom") return [node];
+  return (node.children || []).flatMap(collectAtoms);
+}
+
+function countAtomsByStatus(node, status) {
+  return collectAtoms(node).filter((a) => a.status === status).length;
+}
+
+// Immutable helpers over a tree (an array of category/atom nodes)
+function mapNodeInTree(children, id, fn) {
+  return children.map((n) => {
+    if (n.id === id) return fn(n);
+    if (n.type === "category") return { ...n, children: mapNodeInTree(n.children, id, fn) };
+    return n;
+  });
+}
+function removeNodeFromTree(children, id) {
+  return children
+    .filter((n) => n.id !== id)
+    .map((n) => (n.type === "category" ? { ...n, children: removeNodeFromTree(n.children, id) } : n));
+}
+function findNodeInTree(children, id) {
+  for (const n of children) {
+    if (n.id === id) return n;
+    if (n.type === "category") {
+      const found = findNodeInTree(n.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+// Append newAtoms as children of `parentId` (null = tree root). If the
+// target node is currently an atom, it is first converted into a category —
+// this is the "разбить" (split) operation.
+function addAtomsToTree(children, parentId, newAtoms) {
+  const freshAtoms = newAtoms.map((a) => ({ ...a, type: "atom" }));
+  if (parentId === null) return [...children, ...freshAtoms];
+  return children.map((n) => {
+    if (n.id === parentId) {
+      const base = n.type === "atom" ? { ...n, type: "category", children: [] } : n;
+      return { ...base, children: [...(base.children || []), ...freshAtoms] };
+    }
+    if (n.type === "category") return { ...n, children: addAtomsToTree(n.children, parentId, newAtoms) };
+    return n;
+  });
+}
+
+// Small folder/atom row used while browsing a goal's tree
+function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isCategory = node.type === "category";
+  const activeCount = isCategory ? countAtomsByStatus(node, "active") : 0;
+  const totalCount = isCategory ? collectAtoms(node).length : 0;
+
+  return (
+    <div
+      className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
+      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+    >
+      <button onClick={onOpen} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+        {isCategory ? (
+          <Folder size={20} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
+        ) : (
+          <span
+            className="shrink-0 rounded-full"
+            style={{
+              width: "10px",
+              height: "10px",
+              background: node.status === "active" ? PALETTE.mint : PALETTE.waiting,
+            }}
+          />
+        )}
+        <div className="min-w-0">
+          <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+            {node.en}
+          </p>
+          {isCategory ? (
+            <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.78rem" }}>
+              {activeCount} активных · {totalCount} всего
+            </p>
+          ) : (
+            node.ru && (
+              <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
+                {node.ru}
+              </p>
+            )
+          )}
+        </div>
+      </button>
+
+      {confirmDelete ? (
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+            Удалить?
+          </span>
+          <button
+            onClick={() => onDelete(node.id)}
+            className="text-xs px-2 py-1 rounded-full"
+            style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            Да
+          </button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            className="text-xs px-2 py-1 rounded-full"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            Отмена
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center shrink-0 gap-1">
+          {!isCategory && (
+            <button
+              onClick={() => onToggleStatus(node)}
+              title={node.status === "waiting" ? "Перенести в активную колоду" : "Отложить в долгий ящик"}
+              className="p-1.5 rounded-full"
+              style={{
+                color: node.status === "waiting" ? PALETTE.mint : PALETTE.waiting,
+                background: node.status === "waiting" ? "rgba(217,138,40,0.12)" : "rgba(124,140,153,0.14)",
+              }}
+            >
+              {node.status === "waiting" ? <ArrowRightCircle size={20} /> : <ArrowLeftCircle size={20} />}
+            </button>
+          )}
+          <button onClick={() => onSplit(node.id)} title="Разбить на карточки" className="p-1.5 rounded-full" style={{ color: PALETTE.mintDeep }}>
+            <FolderPlus size={18} />
+          </button>
+          <button onClick={() => setConfirmDelete(true)} title="Удалить" className="p-1.5" style={{ color: "#5B6275" }}>
+            <Trash2 size={15} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Full-screen single atom view: same card mechanics as PracticeView, plus
+// the ability to split this atom into a category right from here.
+function AtomView({ atom, onBack, onSave, onSplit }) {
+  const [flipped, setFlipped] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [showTranscription, setShowTranscription] = useState(false);
+
+  const saveEdit = (fields) => {
+    onSave({ ...atom, ...fields });
+    setEditing(false);
+    setFlipped(false);
+  };
+
+  return (
+    <div className="flex flex-col items-center px-6 py-8">
+      <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Назад
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditing((e) => !e)}
+            title="Редактировать карточку"
+            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: editing ? PALETTE.mustard : PALETTE.chip, color: editing ? PALETTE.bgDeep : PALETTE.fadeText }}
+          >
+            <Pencil size={14} /> редактировать
+          </button>
+          <button
+            onClick={() => setShowTranscription((s) => !s)}
+            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: showTranscription ? PALETTE.mustard : PALETTE.chip, color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText }}
+          >
+            <Type size={14} /> транскрипция
+          </button>
+        </div>
+      </div>
+
+      {editing ? (
+        <CardForm initial={atom} onSave={saveEdit} onCancel={() => setEditing(false)} />
+      ) : (
+        <>
+          <IndexCard item={atom} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={-1.5} showTranscription={showTranscription} onSwipeUp={undefined} />
+          <button
+            onClick={onSplit}
+            className="flex items-center gap-2 mt-8 text-sm px-4 py-2 rounded-full"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, background: PALETTE.chip }}
+          >
+            <FolderPlus size={16} /> разбить на подкарточки
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren }) {
+  const [path, setPath] = useState([]); // array of category node ids from the root
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(goal.name);
+  const [confirmDeleteGoal, setConfirmDeleteGoal] = useState(false);
+  const [addTarget, setAddTarget] = useState(undefined); // undefined = closed, null = root, id = category/split target
+  const [openAtomId, setOpenAtomId] = useState(null);
+  const [practicing, setPracticing] = useState(false);
+
+  const crumbs = [{ id: null, name: goal.name }];
+  let cursor = goal.children;
+  for (const id of path) {
+    const node = findNodeInTree(goal.children, id);
+    if (!node) break;
+    crumbs.push({ id, name: node.en });
+  }
+  // resolve current level's children by walking the path from root
+  let currentChildren = goal.children;
+  for (const id of path) {
+    const node = findNodeInTree(goal.children, id);
+    currentChildren = node ? node.children : [];
+  }
+  const currentParentId = path.length ? path[path.length - 1] : null;
+
+  const updateChildren = (fn) => onSetChildren(goal.id, fn(goal.children));
+
+  const handleSplit = (nodeId) => setAddTarget(nodeId);
+  const handleAddHere = () => setAddTarget(currentParentId);
+  const handleAdd = (newAtoms) => {
+    updateChildren((children) => addAtomsToTree(children, addTarget, newAtoms));
+    setAddTarget(undefined);
+  };
+  const handleDeleteNode = (nodeId) => {
+    updateChildren((children) => removeNodeFromTree(children, nodeId));
+    if (openAtomId === nodeId) setOpenAtomId(null);
+  };
+  const handleToggleStatus = (node) => {
+    updateChildren((children) => mapNodeInTree(children, node.id, (n) => ({ ...n, status: n.status === "waiting" ? "active" : "waiting" })));
+  };
+  const handleSaveAtom = (updatedAtom) => {
+    updateChildren((children) => mapNodeInTree(children, updatedAtom.id, () => updatedAtom));
+  };
+
+  const saveRename = () => {
+    if (nameDraft.trim()) onRename(goal.id, nameDraft);
+    setRenaming(false);
+  };
+
+  // Aggregated practice deck: all active atoms across the WHOLE goal tree
+  const allAtoms = goal.children.flatMap(collectAtoms);
+  const practiceDeck = {
+    items: allAtoms,
+    setItems: (nextItems) => {
+      updateChildren((children) => {
+        let next = children;
+        for (const item of nextItems) {
+          next = mapNodeInTree(next, item.id, (n) => ({ ...n, ...item }));
+        }
+        return next;
+      });
+    },
+  };
+
+  if (practicing) {
+    return (
+      <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+        <div className="max-w-md mx-auto w-full px-6 pt-8">
+          <button onClick={() => setPracticing(false)} className="flex items-center gap-1 text-sm mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            <ArrowLeft size={16} /> {goal.name}
+          </button>
+        </div>
+        <PracticeView deck={practiceDeck} />
+      </div>
+    );
+  }
+
+  if (openAtomId) {
+    const atom = findNodeInTree(goal.children, openAtomId);
+    if (atom) {
+      return (
+        <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+          <AtomView
+            atom={atom}
+            onBack={() => setOpenAtomId(null)}
+            onSave={handleSaveAtom}
+            onSplit={() => {
+              setAddTarget(openAtomId);
+              setOpenAtomId(null);
+            }}
+          />
+        </div>
+      );
+    }
+    setOpenAtomId(null);
+  }
+
+  if (addTarget !== undefined) {
+    return (
+      <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+        <div className="max-w-md mx-auto w-full px-6 pt-8">
+          <button onClick={() => setAddTarget(undefined)} className="flex items-center gap-1 text-sm mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            <ArrowLeft size={16} /> Отмена
+          </button>
+        </div>
+        <BulkAddForm onAdd={handleAdd} onDone={() => setAddTarget(undefined)} doneLabel="Добавить" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8">
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            <ArrowLeft size={16} /> Мои цели
+          </button>
+          {!renaming && (
+            <div className="flex items-center gap-2">
+              <h2 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.3rem" }}>
+                <Target size={16} style={{ display: "inline", marginRight: 6, color: PALETTE.mustard }} />
+                {goal.name}
+              </h2>
+              <button
+                onClick={() => {
+                  setNameDraft(goal.name);
+                  setRenaming(true);
+                }}
+                title="Переименовать цель"
+                style={{ color: PALETTE.fadeText }}
+              >
+                <Pencil size={15} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {renaming && (
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              className="flex-1 rounded-xl px-3 py-2 outline-none"
+              style={{ background: PALETTE.card, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
+            />
+            <button onClick={saveRename} className="px-3 py-2 rounded-xl text-sm" style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+              Сохранить
+            </button>
+            <button onClick={() => setRenaming(false)} className="px-3 py-2 rounded-xl text-sm" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+              Отмена
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 mb-3 overflow-x-auto">
+          {path.length > 0 && (
+            <button onClick={() => setPath((p) => p.slice(0, -1))} title="Наверх" className="p-1.5 rounded-full mr-1 shrink-0" style={{ background: PALETTE.chip, color: PALETTE.fadeText }}>
+              <ArrowUp size={14} />
+            </button>
+          )}
+          {crumbs.map((c, i) => (
+            <React.Fragment key={c.id ?? "root"}>
+              {i > 0 && <ChevronRightSmall size={12} style={{ color: PALETTE.fadeText, flexShrink: 0 }} />}
+              <button
+                onClick={() => setPath(path.slice(0, i))}
+                className="text-xs px-2 py-1 rounded-full whitespace-nowrap"
+                style={{
+                  fontFamily: "'IBM Plex Sans', sans-serif",
+                  color: i === crumbs.length - 1 ? PALETTE.bgDeep : PALETTE.fadeText,
+                  background: i === crumbs.length - 1 ? PALETTE.mustard : "transparent",
+                }}
+              >
+                {c.name}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+
+        <button
+          onClick={() => setPracticing(true)}
+          disabled={allAtoms.filter((a) => a.status === "active").length === 0}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4 disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Повторение ({allAtoms.filter((a) => a.status === "active").length} активных во всей цели)
+        </button>
+      </div>
+
+      <div className="px-6 max-w-md mx-auto w-full pb-4">
+        {currentChildren.length === 0 ? (
+          <p className="text-sm mb-4" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            Здесь пока пусто. Добавь карточки — каждую потом можно «разбить» на подкатегории.
+          </p>
+        ) : (
+          currentChildren.map((node) => (
+            <NodeRow
+              key={node.id}
+              node={node}
+              onOpen={() => (node.type === "category" ? setPath((p) => [...p, node.id]) : setOpenAtomId(node.id))}
+              onSplit={handleSplit}
+              onDelete={handleDeleteNode}
+              onToggleStatus={handleToggleStatus}
+            />
+          ))
+        )}
+
+        <button
+          onClick={handleAddHere}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2"
+          style={{ background: PALETTE.chip, color: PALETTE.mintDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          <Plus size={18} /> Добавить карточки сюда
+        </button>
+      </div>
+
+      <div className="max-w-md mx-auto w-full px-6 pb-10 pt-4">
+        {!confirmDeleteGoal ? (
+          <button onClick={() => setConfirmDeleteGoal(true)} className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}>
+            Удалить цель «{goal.name}»
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+              Удалить цель «{goal.name}» навсегда, вместе со всем деревом?
+            </span>
+            <button onClick={() => onDelete(goal.id)} className="text-xs px-3 py-1.5 rounded-full shrink-0" style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+              Да
+            </button>
+            <button onClick={() => setConfirmDeleteGoal(false)} className="text-xs px-3 py-1.5 rounded-full shrink-0" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+              Отмена
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export default function App() {
-  const phrasesDeck = useDeck("phrases-deck-v3", DEFAULT_PHRASES);
-  const wordsDeck = useDeck("words-deck-v3", DEFAULT_WORDS);
-  const [openDeck, setOpenDeck] = useState(null);
+function FocusDashboard({ goals, onOpen, onAddGoal }) {
+  const countActive = (g) => g.children.flatMap(collectAtoms).filter((a) => a.status === "active").length;
+  const countTotal = (g) => g.children.flatMap(collectAtoms).length;
 
-  const deckFor = (key) => (key === "phrases" ? phrasesDeck : wordsDeck);
-  const titleFor = (key) => (key === "phrases" ? "Фразы" : "Слова");
+  if (goals.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-16">
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
+          Целей пока нет. Создай первую — язык, молитвы, личный бренд, любой проект.
+        </p>
+        <CreateTile label="Создать цель" placeholder="Название цели" onCreate={onAddGoal} big />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
+      {goals.map((goal) => (
+        <button
+          key={goal.id}
+          onClick={() => onOpen(goal.id)}
+          className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center gap-1 transition-transform hover:-translate-y-1"
+          style={{ background: PALETTE.card, boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
+        >
+          <span
+            className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
+            style={{ background: PALETTE.card, boxShadow: "0 10px 20px rgba(140,155,165,0.32), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
+          >
+            <Target size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
+          </span>
+          <span className="mt-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", color: PALETTE.ink, lineHeight: 1.2 }}>
+            {goal.name}
+          </span>
+          <span className="mt-1" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}>
+            {countActive(goal)} активных
+          </span>
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.7rem", color: PALETTE.waiting }}>
+            {countTotal(goal)} карточек всего
+          </span>
+        </button>
+      ))}
+      <CreateTile label="Новая цель" placeholder="Название цели" onCreate={onAddGoal} />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// App shell — mode switch + routing between the two modes' dashboards
+// ════════════════════════════════════════════════════════════════════════
+
+function ModeSwitch({ mode, onChange }) {
+  const options = [
+    { key: "language", label: "Изучение языка", Icon: Languages },
+    { key: "focus", label: "Мои цели", Icon: Target },
+  ];
+  return (
+    <div className="flex gap-2 p-1 rounded-full mb-8" style={{ background: PALETTE.chip }}>
+      {options.map(({ key, label, Icon }) => (
+        <button
+          key={key}
+          onClick={() => onChange(key)}
+          className="flex items-center gap-2 px-4 py-2 rounded-full text-sm"
+          style={{
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            background: mode === key ? PALETTE.mustard : "transparent",
+            color: mode === key ? PALETTE.bgDeep : PALETTE.fadeText,
+          }}
+        >
+          <Icon size={15} /> {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function App() {
+  const { decks, setDeckItems, addDeck, renameDeck, deleteDeck } = useDecks();
+  const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren } = useGoals();
+  const [mode, setMode] = useState("language");
+  const [openDeckId, setOpenDeckId] = useState(null);
+  const [openGoalId, setOpenGoalId] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("app-mode-v1", false);
+        if (!cancelled && res && (res.value === "language" || res.value === "focus")) setMode(res.value);
+      } catch (e) {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const changeMode = (next) => {
+    setMode(next);
+    window.storage.set("app-mode-v1", next, false).catch(() => {});
+  };
+
+  const openDeck = decks.find((d) => d.id === openDeckId) || null;
+  const deckAdapter = openDeck
+    ? { items: openDeck.items, setItems: (items) => setDeckItems(openDeck.id, items) }
+    : null;
+  const openGoal = goals.find((g) => g.id === openGoalId) || null;
+
+  if (mode === "language" && openDeck) {
+    return (
+      <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
+        <DeckHome
+          deckId={openDeck.id}
+          title={openDeck.name}
+          deck={deckAdapter}
+          onBack={() => setOpenDeckId(null)}
+          onRename={renameDeck}
+          onDelete={(id) => {
+            deleteDeck(id);
+            setOpenDeckId(null);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "focus" && openGoal) {
+    return (
+      <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
+        <GoalHome
+          goal={openGoal}
+          onBack={() => setOpenGoalId(null)}
+          onRename={renameGoal}
+          onDelete={(id) => {
+            deleteGoal(id);
+            setOpenGoalId(null);
+          }}
+          onSetChildren={setGoalChildren}
+        />
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <style>{FONT_IMPORT}</style>
-      {!openDeck && <Dashboard phrasesDeck={phrasesDeck} wordsDeck={wordsDeck} onOpen={setOpenDeck} />}
-      {openDeck && (
-        <DeckHome title={titleFor(openDeck)} deck={deckFor(openDeck)} onBack={() => setOpenDeck(null)} />
-      )}
+      <div
+        className="min-h-screen flex flex-col items-center px-6 py-16"
+        style={{ background: `radial-gradient(circle at 50% 0%, ${PALETTE.bgGlow}, ${PALETTE.bg})` }}
+      >
+        <div className="text-center mb-2">
+          <p className="text-sm mb-2 tracking-widest uppercase" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint }}>
+            Карточки для практики
+          </p>
+          <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "2.4rem" }}>
+            {mode === "language" ? "Твои колоды" : "Твои цели"}
+          </h1>
+        </div>
+
+        <ModeSwitch mode={mode} onChange={changeMode} />
+
+        {mode === "language" ? (
+          <LanguageDashboard decks={decks} onOpen={setOpenDeckId} onAddDeck={addDeck} />
+        ) : (
+          <FocusDashboard goals={goals} onOpen={setOpenGoalId} onAddGoal={addGoal} />
+        )}
+      </div>
     </div>
   );
 }
