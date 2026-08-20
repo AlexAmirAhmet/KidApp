@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useLayoutEffect, createContext, useContext } from "react";
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect, useMemo, createContext, useContext } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -113,26 +113,71 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// Splits one "text - перевод - транскрипция - заметка" line into fields.
+// Shared by the bulk-add textarea and the Word-document parser below, so
+// both accept exactly the same line format.
+function parseCardLine(line) {
+  const parts = line
+    .split(/\s-\s|=|—/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return {
+    en: parts[0] || line,
+    ru: parts[1] || "",
+    tr: parts[2] || "",
+    note: parts[3] || "",
+  };
+}
+
 function parseImport(text) {
   return text
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => {
-      const parts = line
-        .split(/\s-\s|=|—/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-      return {
-        id: uid(),
-        en: parts[0] || line,
-        ru: parts[1] || "",
-        tr: parts[2] || "",
-        note: parts[3] || "",
-        status: "waiting",
-      };
-    })
+    .map((line) => ({ id: uid(), status: "waiting", ...parseCardLine(line) }))
     .filter((item) => item.en);
+}
+
+// ---- "Слово" documents: a text laid out with the study-word protocol
+// (## headings -> tabs, plain lines -> cards, "> " lines -> that card's
+// nested example children) is parsed fresh from its raw body every time —
+// it's read-only content, not a separate mutable store. ----
+function isWordDocument(body) {
+  return /^##\s?/m.test(body || "");
+}
+
+function parseWordDocument(body) {
+  const tabs = [];
+  let currentTab = null;
+  let currentParent = null;
+
+  for (const raw of (body || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (line.startsWith("##")) {
+      const title = line.replace(/^##+\s*/, "").trim() || `Раздел ${tabs.length + 1}`;
+      currentTab = { id: uid(), title, cards: [] };
+      tabs.push(currentTab);
+      currentParent = null;
+      continue;
+    }
+
+    if (!currentTab) continue; // content before the first heading has no tab to belong to
+
+    if (line.startsWith(">")) {
+      const content = line.slice(1).trim();
+      if (!content || !currentParent) continue;
+      currentParent.children.push({ id: uid(), ...parseCardLine(content) });
+      continue;
+    }
+
+    const card = { id: uid(), ...parseCardLine(line), children: [] };
+    currentTab.cards.push(card);
+    currentParent = card;
+  }
+
+  return tabs;
 }
 
 function shuffleArr(arr) {
@@ -2059,6 +2104,172 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// "Слово" documents — a text laid out with the study-word protocol renders
+// as dynamic tabs (one per "##" heading) of ordinary flip-cards, reusing
+// the same list -> drill-into-children -> flip-card navigation already
+// built for Focus mode, just for this one read-only, two-level structure
+// derived fresh from the text's raw body. No active/waiting here at all.
+// ════════════════════════════════════════════════════════════════════════
+
+function WordCardRow({ card, onOpen }) {
+  const PALETTE = useTheme();
+  const hasChildren = card.children && card.children.length > 0;
+  return (
+    <button
+      onClick={onOpen}
+      className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2 w-full text-left"
+      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+    >
+      <div className="min-w-0">
+        <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {card.en}
+        </p>
+        {card.ru && (
+          <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
+            {card.ru}
+          </p>
+        )}
+      </div>
+      {hasChildren && (
+        <span
+          className="flex items-center gap-1 shrink-0 text-xs px-2 py-1 rounded-full"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.card, color: PALETTE.mintDeep }}
+        >
+          {card.children.length} <ChevronRightSmall size={12} />
+        </span>
+      )}
+    </button>
+  );
+}
+
+function WordCardView({ card, onBack }) {
+  const PALETTE = useTheme();
+  const [flipped, setFlipped] = useState(false);
+  const [showTranscription, setShowTranscription] = useState(false);
+
+  return (
+    <div className="flex flex-col items-center px-6 py-8">
+      <div className="w-full max-w-md flex items-center justify-between mb-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Назад
+        </button>
+        <button
+          onClick={() => setShowTranscription((s) => !s)}
+          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: showTranscription ? PALETTE.mustard : PALETTE.chip, color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText }}
+        >
+          <Type size={14} /> транскрипция
+        </button>
+      </div>
+      <IndexCard item={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={-1.5} showTranscription={showTranscription} onSwipeUp={undefined} />
+    </div>
+  );
+}
+
+function WordView({ text, onBack, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const tabs = useMemo(() => parseWordDocument(text.body), [text.body]);
+  const [tabIndex, setTabIndex] = useState(0);
+  const [openParentId, setOpenParentId] = useState(null);
+  const [openCard, setOpenCard] = useState(null);
+
+  useEffect(() => {
+    setTabIndex(0);
+    setOpenParentId(null);
+    setOpenCard(null);
+  }, [text.id]);
+
+  const activeTab = tabs[tabIndex] || null;
+  const parentCard = activeTab && openParentId ? activeTab.cards.find((c) => c.id === openParentId) : null;
+
+  const header = (
+    <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
+      <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+        <ArrowLeft size={16} /> Тексты
+      </button>
+      <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
+        {text.title}
+      </h2>
+      <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+    </div>
+  );
+
+  if (openCard) {
+    return (
+      <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+        {header}
+        <WordCardView card={openCard} onBack={() => setOpenCard(null)} />
+      </div>
+    );
+  }
+
+  if (!tabs.length) {
+    return (
+      <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+        {header}
+        <p className="px-6 pt-8 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          В этом тексте не найдено ни одного заголовка «##».
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      {header}
+      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10">
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+          {tabs.map((tab, i) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setTabIndex(i);
+                setOpenParentId(null);
+              }}
+              className="text-xs px-3 py-2 rounded-full whitespace-nowrap shrink-0"
+              style={{
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                background: i === tabIndex ? PALETTE.mustard : PALETTE.chip,
+                color: i === tabIndex ? PALETTE.bgDeep : PALETTE.fadeText,
+              }}
+            >
+              {tab.title}
+            </button>
+          ))}
+        </div>
+
+        {parentCard ? (
+          <>
+            <button
+              onClick={() => setOpenParentId(null)}
+              className="flex items-center gap-1 text-xs mb-3"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+            >
+              <ArrowUp size={13} /> {parentCard.en}
+            </button>
+            {parentCard.children.map((child) => (
+              <WordCardRow key={child.id} card={child} onOpen={() => setOpenCard(child)} />
+            ))}
+          </>
+        ) : activeTab.cards.length === 0 ? (
+          <p className="text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            В этом разделе пока нет карточек.
+          </p>
+        ) : (
+          activeTab.cards.map((card) => (
+            <WordCardRow
+              key={card.id}
+              card={card}
+              onOpen={() => (card.children.length > 0 ? setOpenParentId(card.id) : setOpenCard(card))}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Full-screen create/edit form for a text — mirrors DeckHome/GoalHome: its
 // own screen, no dashboard tagline/mode-switch chrome above it.
 function PagesFormScreen({ initial, onCancel, onSave }) {
@@ -2259,7 +2470,9 @@ export default function App() {
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
 
-        {mode === "pages" && openText ? (
+        {mode === "pages" && openText && isWordDocument(openText.body) ? (
+          <WordView text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
+        ) : mode === "pages" && openText ? (
           <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
         ) : mode === "pages" && (pagesCreating || editingText) ? (
           <PagesFormScreen
