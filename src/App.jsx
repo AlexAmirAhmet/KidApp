@@ -2597,10 +2597,14 @@ function SelectionCapture({ onAdd }) {
         setSel(null);
         return;
       }
-      const above = rect.top > 60;
-      const top = above ? rect.top - 10 : rect.bottom + 10;
+      // Always below the selection, never above: on Android the system's
+      // own Copy/Share selection menu always renders above the selected
+      // text, so anchoring here to rect.top would put our button right
+      // underneath it, invisible. Anchoring to rect.bottom instead puts
+      // the two on opposite sides of the selection, guaranteed clear.
+      const top = Math.min(rect.bottom + 10, window.innerHeight - 44);
       const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
-      setSel({ text, top, left, above });
+      setSel({ text, top, left });
     };
     const hide = () => setSel(null);
 
@@ -2629,7 +2633,7 @@ function SelectionCapture({ onAdd }) {
       style={{
         top: `${sel.top}px`,
         left: `${sel.left}px`,
-        transform: sel.above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+        transform: "translate(-50%, 0)",
         zIndex: 9999,
         background: PALETTE.mustard,
         color: PALETTE.bgDeep,
