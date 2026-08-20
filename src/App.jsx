@@ -321,7 +321,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
       onClick={handleClick}
-      className="relative w-full max-w-md cursor-pointer select-none"
+      className="relative w-full max-w-md cursor-pointer"
       style={{ perspective: "1200px" }}
     >
       {swipeProgress > 0 && (
@@ -363,7 +363,13 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
         />
         {!flipped ? (
           <>
+            {/* The term currently being studied — not selectable/capturable
+                into Vocabulary, since adding a word to a vocabulary list
+                while it's already the thing being actively learned is
+                pointless. Everything else on the card (transcription,
+                translation, note) stays selectable. */}
             <p
+              className="select-none"
               style={{
                 fontFamily: "'Fraunces', serif",
                 color: PALETTE.ink,
@@ -2597,14 +2603,29 @@ function SelectionCapture({ onAdd }) {
         setSel(null);
         return;
       }
-      // Always below the selection, never above: on Android the system's
-      // own Copy/Share selection menu always renders above the selected
-      // text, so anchoring here to rect.top would put our button right
-      // underneath it, invisible. Anchoring to rect.bottom instead puts
-      // the two on opposite sides of the selection, guaranteed clear.
-      const top = Math.min(rect.bottom + 10, window.innerHeight - 44);
-      const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
-      setSel({ text, top, left });
+      // Android's system Copy/Share selection menu normally renders above
+      // the selected text, so anchoring below (rect.bottom) keeps clear of
+      // it — except when the selection is too close to the top of the
+      // viewport for the menu to fit up there: in that case Android flips
+      // its own menu to below the selection instead, landing right where
+      // our "always below" button would sit. SYSTEM_MENU_CLEARANCE is an
+      // empirical estimate of the system menu's height; when there isn't
+      // room above for it, assume it flipped below and place our button to
+      // whichever side has more horizontal room instead, so the two never
+      // compete for the same space regardless of which way it flips.
+      const SYSTEM_MENU_CLEARANCE = 56;
+      if (rect.top >= SYSTEM_MENU_CLEARANCE) {
+        const top = Math.min(rect.bottom + 10, window.innerHeight - 44);
+        const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
+        setSel({ text, placement: "below", top, left });
+      } else {
+        const spaceRight = window.innerWidth - rect.right;
+        const spaceLeft = rect.left;
+        const placement = spaceRight >= spaceLeft ? "right" : "left";
+        const top = Math.min(Math.max(rect.top + rect.height / 2, 30), window.innerHeight - 30);
+        const left = placement === "right" ? Math.min(rect.right + 8, window.innerWidth - 8) : Math.max(rect.left - 8, 8);
+        setSel({ text, placement, top, left });
+      }
     };
     const hide = () => setSel(null);
 
@@ -2624,6 +2645,9 @@ function SelectionCapture({ onAdd }) {
     setSel(null);
   };
 
+  const transform =
+    sel.placement === "right" ? "translate(0, -50%)" : sel.placement === "left" ? "translate(-100%, -50%)" : "translate(-50%, 0)";
+
   return (
     <button
       onMouseDown={(e) => e.preventDefault()}
@@ -2633,7 +2657,7 @@ function SelectionCapture({ onAdd }) {
       style={{
         top: `${sel.top}px`,
         left: `${sel.left}px`,
-        transform: "translate(-50%, 0)",
+        transform,
         zIndex: 9999,
         background: PALETTE.mustard,
         color: PALETTE.bgDeep,
