@@ -25,6 +25,7 @@ import {
   Moon,
   RotateCcw,
   BookMarked,
+  ChevronDown,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -94,6 +95,14 @@ const DARK_PALETTE = {
 const ThemeContext = createContext(LIGHT_PALETTE);
 function useTheme() {
   return useContext(ThemeContext);
+}
+
+// Whether transcription is shown is a single app-wide toggle (persisted like
+// the theme), not per-screen local state — flip it once, it stays on
+// everywhere: language cards, focus atoms, Слово cards alike.
+const TranscriptionContext = createContext([false, () => {}]);
+function useTranscription() {
+  return useContext(TranscriptionContext);
 }
 
 function ThemeToggle({ isDark, onToggle, size = 15 }) {
@@ -504,7 +513,7 @@ function PracticeView({ deck, resetScopeLabel }) {
   const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [rotation, setRotation] = useState(-1.5);
-  const [showTranscription, setShowTranscription] = useState(false);
+  const [showTranscription, setShowTranscription] = useTranscription();
   const [editing, setEditing] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -1474,7 +1483,7 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
   const PALETTE = useTheme();
   const [flipped, setFlipped] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [showTranscription, setShowTranscription] = useState(false);
+  const [showTranscription, setShowTranscription] = useTranscription();
 
   const saveEdit = (fields) => {
     onSave({ ...atom, ...fields });
@@ -2115,28 +2124,49 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
 // derived fresh from the text's raw body. No active/waiting here at all.
 // ════════════════════════════════════════════════════════════════════════
 
-function WordCardRow({ card, onOpen }) {
+// emphasizeMeaning flips which field reads as the headline: in the
+// "Значения" tab the meaning is what the user is actually scanning for
+// (the word itself is already known — it's in the screen title), so the
+// translation gets the large serif treatment and the word shrinks down.
+// The text block itself never truncates to a single line any more — it
+// wraps fully, capped at maxHeight with its own scroll for the rare very
+// long example, rather than clipping the example/nuance text with an
+// ellipsis the way a fixed-size row used to.
+function WordCardRow({ card, onOpen, emphasizeMeaning }) {
   const PALETTE = useTheme();
   const hasChildren = card.children && card.children.length > 0;
+  const bigStyle = { fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem", lineHeight: 1.35 };
+  const smallStyle = { fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem", lineHeight: 1.35 };
+  const meaningFirst = emphasizeMeaning && card.ru;
+
   return (
     <button
       onClick={onOpen}
-      className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2 w-full text-left"
+      className="flex items-start justify-between gap-3 px-4 py-3 rounded-2xl mb-2 w-full text-left"
       style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
     >
-      <div className="min-w-0">
-        <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
-          {card.en}
-        </p>
-        {card.ru && (
-          <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
-            {card.ru}
-          </p>
+      <div className="min-w-0 flex-1 overflow-y-auto" style={{ maxHeight: "9.5rem" }}>
+        {meaningFirst ? (
+          <>
+            <p style={bigStyle}>{card.ru}</p>
+            <p className="mt-0.5" style={smallStyle}>
+              {card.en}
+            </p>
+          </>
+        ) : (
+          <>
+            <p style={bigStyle}>{card.en}</p>
+            {card.ru && (
+              <p className="mt-0.5" style={smallStyle}>
+                {card.ru}
+              </p>
+            )}
+          </>
         )}
       </div>
       {hasChildren && (
         <span
-          className="flex items-center gap-1 shrink-0 text-xs px-2 py-1 rounded-full"
+          className="flex items-center gap-1 shrink-0 text-xs px-2 py-1 rounded-full mt-0.5"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.card, color: PALETTE.mintDeep }}
         >
           {card.children.length} <ChevronRightSmall size={12} />
@@ -2146,10 +2176,79 @@ function WordCardRow({ card, onOpen }) {
   );
 }
 
+// Compact mind-map style position indicator for the "Слово" screen: the
+// word itself is the root, its tabs branch off as siblings, and the path
+// grows one node deeper for each level the user has drilled into (a
+// meaning's examples, then the open example itself) — tapping any node,
+// at any depth, jumps straight there instead of stepping back one level
+// at a time. Rendered above both the card list and the single-card flip
+// view, since the old text breadcrumb used to vanish in the latter.
+function WordTree({ wordTitle, tabs, tabIndex, onSelectTab, parentCard, onSelectParent, openCard }) {
+  const PALETTE = useTheme();
+  const connector = <ChevronDown size={12} style={{ color: PALETTE.fadeText, opacity: 0.55 }} />;
+  const pillStyle = (isActive) => ({
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    background: isActive ? PALETTE.mustard : PALETTE.chip,
+    color: isActive ? PALETTE.bgDeep : PALETTE.fadeText,
+  });
+
+  return (
+    <div className="max-w-md mx-auto w-full px-6 flex flex-col items-center gap-1 mb-2">
+      <button
+        onClick={() => onSelectTab(tabIndex)}
+        className="truncate px-3 py-1 rounded-full text-xs"
+        style={{
+          fontFamily: "'Fraunces', serif",
+          fontStyle: "italic",
+          background: PALETTE.card,
+          color: PALETTE.cream,
+          border: `1px solid ${PALETTE.cardEdge}`,
+          maxWidth: "240px",
+        }}
+      >
+        {wordTitle}
+      </button>
+      {connector}
+      <div className="flex flex-wrap justify-center gap-1.5">
+        {tabs.map((tab, i) => (
+          <button
+            key={tab.id}
+            onClick={() => onSelectTab(i)}
+            className="truncate px-3 py-1.5 rounded-full text-xs"
+            style={{ ...pillStyle(i === tabIndex), maxWidth: "160px" }}
+          >
+            {tab.title}
+          </button>
+        ))}
+      </div>
+      {parentCard && (
+        <>
+          {connector}
+          <button
+            onClick={onSelectParent}
+            className="truncate px-3 py-1.5 rounded-full text-xs"
+            style={{ ...pillStyle(!openCard), maxWidth: "220px" }}
+          >
+            {parentCard.en}
+          </button>
+        </>
+      )}
+      {openCard && (
+        <>
+          {connector}
+          <span className="truncate px-3 py-1.5 rounded-full text-xs" style={{ ...pillStyle(true), maxWidth: "220px" }}>
+            {openCard.en}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
   const PALETTE = useTheme();
   const [flipped, setFlipped] = useState(false);
-  const [showTranscription, setShowTranscription] = useState(false);
+  const [showTranscription, setShowTranscription] = useTranscription();
 
   useEffect(() => {
     setFlipped(false);
@@ -2217,6 +2316,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
 
   const activeTab = tabs[tabIndex] || null;
   const parentCard = activeTab && openParentId ? activeTab.cards.find((c) => c.id === openParentId) : null;
+  const emphasizeMeaning = !!(activeTab && /^значен/i.test(activeTab.title.trim()));
 
   // The navigable list for whichever card-flip context is open: a parent's
   // children when drilled in, otherwise the tab's own leaf cards (the only
@@ -2227,6 +2327,12 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
     if (!cardList.length) return;
     setOpenCardIndex((newIndex + cardList.length) % cardList.length);
   };
+  const goToTab = (i) => {
+    setTabIndex(i);
+    setOpenParentId(null);
+    setOpenCardIndex(null);
+  };
+  const goToParent = () => setOpenCardIndex(null);
 
   const header = (
     <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
@@ -2240,10 +2346,23 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
     </div>
   );
 
+  const tree = tabs.length > 0 && (
+    <WordTree
+      wordTitle={text.title}
+      tabs={tabs}
+      tabIndex={tabIndex}
+      onSelectTab={goToTab}
+      parentCard={parentCard}
+      onSelectParent={goToParent}
+      openCard={openCard}
+    />
+  );
+
   if (openCard) {
     return (
       <div className="min-h-screen" style={{ background: PALETTE.bg }}>
         {header}
+        {tree}
         <WordCardView
           card={openCard}
           onBack={() => setOpenCardIndex(null)}
@@ -2270,40 +2389,12 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
       {header}
-      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10">
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          {tabs.map((tab, i) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setTabIndex(i);
-                setOpenParentId(null);
-              }}
-              className="text-xs px-3 py-2 rounded-full whitespace-nowrap shrink-0"
-              style={{
-                fontFamily: "'IBM Plex Sans', sans-serif",
-                background: i === tabIndex ? PALETTE.mustard : PALETTE.chip,
-                color: i === tabIndex ? PALETTE.bgDeep : PALETTE.fadeText,
-              }}
-            >
-              {tab.title}
-            </button>
-          ))}
-        </div>
-
+      {tree}
+      <div className="max-w-md mx-auto w-full px-6 pt-2 pb-10">
         {parentCard ? (
-          <>
-            <button
-              onClick={() => setOpenParentId(null)}
-              className="flex items-center gap-1 text-xs mb-3"
-              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
-            >
-              <ArrowUp size={13} /> {parentCard.en}
-            </button>
-            {parentCard.children.map((child, i) => (
-              <WordCardRow key={child.id} card={child} onOpen={() => setOpenCardIndex(i)} />
-            ))}
-          </>
+          parentCard.children.map((child, i) => (
+            <WordCardRow key={child.id} card={child} onOpen={() => setOpenCardIndex(i)} emphasizeMeaning={false} />
+          ))
         ) : activeTab.cards.length === 0 ? (
           <p className="text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
             В этом разделе пока нет карточек.
@@ -2313,6 +2404,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
             <WordCardRow
               key={card.id}
               card={card}
+              emphasizeMeaning={emphasizeMeaning}
               onOpen={() =>
                 card.children.length > 0
                   ? setOpenParentId(card.id)
@@ -2483,6 +2575,7 @@ export default function App() {
   const [wordCreating, setWordCreating] = useState(false);
   const [wordEditingId, setWordEditingId] = useState(null);
   const [isDark, setIsDark] = useState(false);
+  const [showTranscription, setShowTranscriptionRaw] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2495,10 +2588,22 @@ export default function App() {
         const res = await window.storage.get("theme-v1", false);
         if (!cancelled && res && (res.value === "dark" || res.value === "light")) setIsDark(res.value === "dark");
       } catch (e) {}
+      try {
+        const res = await window.storage.get("transcription-v1", false);
+        if (!cancelled && res && (res.value === "on" || res.value === "off")) setShowTranscriptionRaw(res.value === "on");
+      } catch (e) {}
     })();
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const setShowTranscription = useCallback((next) => {
+    setShowTranscriptionRaw((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      window.storage.set("transcription-v1", value ? "on" : "off", false).catch(() => {});
+      return value;
+    });
   }, []);
 
   const theme = isDark ? DARK_PALETTE : LIGHT_PALETTE;
@@ -2531,6 +2636,7 @@ export default function App() {
 
   return (
     <ThemeContext.Provider value={theme}>
+    <TranscriptionContext.Provider value={[showTranscription, setShowTranscription]}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
 
@@ -2639,6 +2745,7 @@ export default function App() {
           </div>
         )}
       </div>
+    </TranscriptionContext.Provider>
     </ThemeContext.Provider>
   );
 }
