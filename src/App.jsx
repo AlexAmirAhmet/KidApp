@@ -24,6 +24,7 @@ import {
   Sun,
   Moon,
   RotateCcw,
+  BookMarked,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -142,10 +143,6 @@ function parseImport(text) {
 // (## headings -> tabs, plain lines -> cards, "> " lines -> that card's
 // nested example children) is parsed fresh from its raw body every time —
 // it's read-only content, not a separate mutable store. ----
-function isWordDocument(body) {
-  return /^##\s?/m.test(body || "");
-}
-
 function parseWordDocument(body) {
   const tabs = [];
   let currentTab = null;
@@ -1821,14 +1818,17 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
 // active/waiting status, no folders: just paste a text and read it.
 // ════════════════════════════════════════════════════════════════════════
 
-function usePagesTexts() {
+// Generic CRUD store for a flat list of {id, title, body} documents, keyed
+// by storageKey — backs both "Pages" texts and "Слово" documents, which are
+// otherwise unrelated stores that just happen to share the same shape.
+function useTextDocs(storageKey) {
   const [texts, setTexts] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await window.storage.get("pages-texts-v1", false);
+        const res = await window.storage.get(storageKey, false);
         if (!cancelled && res && res.value) {
           const parsed = JSON.parse(res.value);
           if (Array.isArray(parsed)) setTexts(parsed);
@@ -1840,16 +1840,19 @@ function usePagesTexts() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [storageKey]);
 
-  const persist = useCallback(async (next) => {
-    setTexts(next);
-    try {
-      await window.storage.set("pages-texts-v1", JSON.stringify(next), false);
-    } catch (e) {
-      console.error("Storage error", e);
-    }
-  }, []);
+  const persist = useCallback(
+    async (next) => {
+      setTexts(next);
+      try {
+        await window.storage.set(storageKey, JSON.stringify(next), false);
+      } catch (e) {
+        console.error("Storage error", e);
+      }
+    },
+    [storageKey]
+  );
 
   const addText = useCallback(
     (title, body) => {
@@ -1875,7 +1878,7 @@ function usePagesTexts() {
   return { texts, addText, updateText, deleteText };
 }
 
-function TextForm({ initial, onSave, onCancel }) {
+function TextForm({ initial, onSave, onCancel, titlePlaceholder = "Название текста", bodyPlaceholder = "Вставь текст целиком — разбивка на страницы произойдёт автоматически" }) {
   const PALETTE = useTheme();
   const [title, setTitle] = useState(initial?.title || "");
   const [body, setBody] = useState(initial?.body || "");
@@ -1894,14 +1897,14 @@ function TextForm({ initial, onSave, onCancel }) {
         autoFocus
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="Название текста"
+        placeholder={titlePlaceholder}
         className="rounded-xl px-3 py-2 outline-none"
         style={fieldStyle}
       />
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Вставь текст целиком — разбивка на страницы произойдёт автоматически"
+        placeholder={bodyPlaceholder}
         rows={14}
         className="rounded-xl p-4 outline-none resize-none"
         style={fieldStyle}
@@ -2143,26 +2146,58 @@ function WordCardRow({ card, onOpen }) {
   );
 }
 
-function WordCardView({ card, onBack }) {
+function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
   const PALETTE = useTheme();
   const [flipped, setFlipped] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
 
+  useEffect(() => {
+    setFlipped(false);
+  }, [card.id]);
+
+  const canStep = total > 1;
+
   return (
     <div className="flex flex-col items-center px-6 py-8">
-      <div className="w-full max-w-md flex items-center justify-between mb-6">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+      <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
           <ArrowLeft size={16} /> Назад
         </button>
+        {canStep && (
+          <span className="text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}>
+            {position + 1} / {total}
+          </span>
+        )}
         <button
           onClick={() => setShowTranscription((s) => !s)}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full shrink-0"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: showTranscription ? PALETTE.mustard : PALETTE.chip, color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText }}
         >
           <Type size={14} /> транскрипция
         </button>
       </div>
       <IndexCard item={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={-1.5} showTranscription={showTranscription} onSwipeUp={undefined} />
+
+      {canStep && (
+        <div className="flex items-center gap-6 mt-10">
+          <button
+            onClick={onPrev}
+            className="rounded-full flex items-center justify-center"
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            aria-label="Предыдущая"
+          >
+            <ChevronLeft size={28} strokeWidth={2.5} />
+          </button>
+          <button
+            onClick={onNext}
+            className="rounded-full flex items-center justify-center"
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            aria-label="Следующая"
+          >
+            <ChevronRight size={28} strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2172,21 +2207,31 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
   const tabs = useMemo(() => parseWordDocument(text.body), [text.body]);
   const [tabIndex, setTabIndex] = useState(0);
   const [openParentId, setOpenParentId] = useState(null);
-  const [openCard, setOpenCard] = useState(null);
+  const [openCardIndex, setOpenCardIndex] = useState(null);
 
   useEffect(() => {
     setTabIndex(0);
     setOpenParentId(null);
-    setOpenCard(null);
+    setOpenCardIndex(null);
   }, [text.id]);
 
   const activeTab = tabs[tabIndex] || null;
   const parentCard = activeTab && openParentId ? activeTab.cards.find((c) => c.id === openParentId) : null;
 
+  // The navigable list for whichever card-flip context is open: a parent's
+  // children when drilled in, otherwise the tab's own leaf cards (the only
+  // top-level cards that open directly instead of drilling down).
+  const cardList = parentCard ? parentCard.children : activeTab ? activeTab.cards.filter((c) => c.children.length === 0) : [];
+  const openCard = openCardIndex != null ? cardList[openCardIndex] : null;
+  const goToCard = (newIndex) => {
+    if (!cardList.length) return;
+    setOpenCardIndex((newIndex + cardList.length) % cardList.length);
+  };
+
   const header = (
     <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
       <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-        <ArrowLeft size={16} /> Тексты
+        <ArrowLeft size={16} /> Слова
       </button>
       <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
         {text.title}
@@ -2199,7 +2244,14 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
     return (
       <div className="min-h-screen" style={{ background: PALETTE.bg }}>
         {header}
-        <WordCardView card={openCard} onBack={() => setOpenCard(null)} />
+        <WordCardView
+          card={openCard}
+          onBack={() => setOpenCardIndex(null)}
+          onPrev={() => goToCard(openCardIndex - 1)}
+          onNext={() => goToCard(openCardIndex + 1)}
+          position={openCardIndex}
+          total={cardList.length}
+        />
       </div>
     );
   }
@@ -2248,8 +2300,8 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
             >
               <ArrowUp size={13} /> {parentCard.en}
             </button>
-            {parentCard.children.map((child) => (
-              <WordCardRow key={child.id} card={child} onOpen={() => setOpenCard(child)} />
+            {parentCard.children.map((child, i) => (
+              <WordCardRow key={child.id} card={child} onOpen={() => setOpenCardIndex(i)} />
             ))}
           </>
         ) : activeTab.cards.length === 0 ? (
@@ -2261,7 +2313,11 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
             <WordCardRow
               key={card.id}
               card={card}
-              onOpen={() => (card.children.length > 0 ? setOpenParentId(card.id) : setOpenCard(card))}
+              onOpen={() =>
+                card.children.length > 0
+                  ? setOpenParentId(card.id)
+                  : setOpenCardIndex(cardList.findIndex((c) => c.id === card.id))
+              }
             />
           ))
         )}
@@ -2272,7 +2328,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
 
 // Full-screen create/edit form for a text — mirrors DeckHome/GoalHome: its
 // own screen, no dashboard tagline/mode-switch chrome above it.
-function PagesFormScreen({ initial, onCancel, onSave }) {
+function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlaceholder }) {
   const PALETTE = useTheme();
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
@@ -2285,14 +2341,15 @@ function PagesFormScreen({ initial, onCancel, onSave }) {
           <ArrowLeft size={16} /> Отмена
         </button>
       </div>
-      <TextForm initial={initial} onCancel={onCancel} onSave={onSave} />
+      <TextForm initial={initial} onCancel={onCancel} onSave={onSave} titlePlaceholder={titlePlaceholder} bodyPlaceholder={bodyPlaceholder} />
     </div>
   );
 }
 
-// The Pages-mode "dashboard": a flat list of texts, rendered under the same
-// tagline/mode-switch chrome as the language/focus dashboards.
-function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
+// A flat list of {id, title, body} documents with create/edit/delete — backs
+// both the Pages dashboard and the Слово dashboard, which only differ in
+// copy and icon.
+function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText = "Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.", createLabel = "Добавить текст", rowIcon: RowIcon = BookOpen }) {
   const PALETTE = useTheme();
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2301,7 +2358,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
       {texts.length === 0 ? (
         <div className="flex flex-col items-center gap-6 py-10">
           <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
-            Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.
+            {emptyText}
           </p>
           <button
             onClick={onCreate}
@@ -2311,7 +2368,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
             <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
               <Plus size={24} style={{ color: PALETTE.mustard }} />
             </span>
-            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>Добавить текст</span>
+            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>{createLabel}</span>
           </button>
         </div>
       ) : (
@@ -2323,7 +2380,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
               style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
             >
               <button onClick={() => onOpen(t.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                <BookOpen size={18} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
+                <RowIcon size={18} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
                 <div className="min-w-0">
                   <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
                     {t.title}
@@ -2371,7 +2428,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
             className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2 mb-10"
             style={{ background: PALETTE.chip, color: PALETTE.mint, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            <Plus size={18} /> Добавить текст
+            <Plus size={18} /> {createLabel}
           </button>
         </>
       )}
@@ -2380,7 +2437,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// App shell — theme, mode switch, routing between the three modes
+// App shell — theme, mode switch, routing between the four modes
 // ════════════════════════════════════════════════════════════════════════
 
 function ModeSwitch({ mode, onChange }) {
@@ -2389,6 +2446,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "language", label: "Изучение языка", Icon: Languages },
     { key: "focus", label: "Мои цели", Icon: Target },
     { key: "pages", label: "Pages", Icon: BookOpen },
+    { key: "words", label: "Слово", Icon: BookMarked },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -2413,13 +2471,17 @@ function ModeSwitch({ mode, onChange }) {
 export default function App() {
   const { decks, setDeckItems, addDeck, renameDeck, deleteDeck } = useDecks();
   const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren } = useGoals();
-  const { texts, addText, updateText, deleteText } = usePagesTexts();
+  const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
+  const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
   const [openTextId, setOpenTextId] = useState(null);
   const [pagesCreating, setPagesCreating] = useState(false);
   const [pagesEditingId, setPagesEditingId] = useState(null);
+  const [openWordId, setOpenWordId] = useState(null);
+  const [wordCreating, setWordCreating] = useState(false);
+  const [wordEditingId, setWordEditingId] = useState(null);
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -2427,7 +2489,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && (res.value === "language" || res.value === "focus" || res.value === "pages")) setMode(res.value);
+        if (!cancelled && res && (res.value === "language" || res.value === "focus" || res.value === "pages" || res.value === "words")) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -2464,15 +2526,15 @@ export default function App() {
   const openGoal = goals.find((g) => g.id === openGoalId) || null;
   const openText = texts.find((t) => t.id === openTextId) || null;
   const editingText = texts.find((t) => t.id === pagesEditingId) || null;
+  const openWord = words.find((w) => w.id === openWordId) || null;
+  const editingWord = words.find((w) => w.id === wordEditingId) || null;
 
   return (
     <ThemeContext.Provider value={theme}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
 
-        {mode === "pages" && openText && isWordDocument(openText.body) ? (
-          <WordView text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
-        ) : mode === "pages" && openText ? (
+        {mode === "pages" && openText ? (
           <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
         ) : mode === "pages" && (pagesCreating || editingText) ? (
           <PagesFormScreen
@@ -2486,6 +2548,24 @@ export default function App() {
               else addText(title, body);
               setPagesCreating(false);
               setPagesEditingId(null);
+            }}
+          />
+        ) : mode === "words" && openWord ? (
+          <WordView text={openWord} onBack={() => setOpenWordId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
+        ) : mode === "words" && (wordCreating || editingWord) ? (
+          <PagesFormScreen
+            initial={editingWord}
+            titlePlaceholder="Название слова"
+            bodyPlaceholder={"Разметка: «## Заголовок» — новая вкладка; обычная строка — карточка (english - перевод - транскрипция - контекст); строка с «>» — пример-потомок предыдущей карточки"}
+            onCancel={() => {
+              setWordCreating(false);
+              setWordEditingId(null);
+            }}
+            onSave={(title, body) => {
+              if (editingWord) updateWord(editingWord.id, title, body);
+              else addWord(title, body);
+              setWordCreating(false);
+              setWordEditingId(null);
             }}
           />
         ) : mode === "language" && openDeck ? (
@@ -2522,7 +2602,7 @@ export default function App() {
                 Small pieces. Big change.
               </p>
               <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: theme.cream, fontSize: "2.4rem" }}>
-                {mode === "language" ? "Твои колоды" : mode === "focus" ? "Твои цели" : "Твои тексты"}
+                {mode === "language" ? "Твои колоды" : mode === "focus" ? "Твои цели" : mode === "words" ? "Твои слова" : "Твои тексты"}
               </h1>
             </div>
 
@@ -2536,6 +2616,17 @@ export default function App() {
               <LanguageDashboard decks={decks} onOpen={setOpenDeckId} onAddDeck={addDeck} />
             ) : mode === "focus" ? (
               <FocusDashboard goals={goals} onOpen={setOpenGoalId} onAddGoal={addGoal} />
+            ) : mode === "words" ? (
+              <PagesList
+                texts={words}
+                onOpen={setOpenWordId}
+                onCreate={() => setWordCreating(true)}
+                onEdit={setWordEditingId}
+                onDelete={deleteWord}
+                emptyText="Слов пока нет. Добавь первое — с разметкой «## / > »."
+                createLabel="Новое слово"
+                rowIcon={BookMarked}
+              />
             ) : (
               <PagesList
                 texts={texts}
