@@ -2613,9 +2613,17 @@ function SelectionCapture({ onAdd }) {
       // room above for it, assume it flipped below and place our button to
       // whichever side has more horizontal room instead, so the two never
       // compete for the same space regardless of which way it flips.
+      // Android also draws two small draggable "ear" handles at the start
+      // and end of the selection, extending roughly 20-24px past the text
+      // itself (below and to the sides) so the user can drag them to
+      // resize the selection. The button doesn't need to hug the text —
+      // it just needs to clear both the system menu and these handles — so
+      // every offset below is padded past that handle size with room to
+      // spare, not just past the text's own edge.
       const SYSTEM_MENU_CLEARANCE = 56;
+      const HANDLE_CLEARANCE = 30;
       if (rect.top >= SYSTEM_MENU_CLEARANCE) {
-        const top = Math.min(rect.bottom + 10, window.innerHeight - 44);
+        const top = Math.min(rect.bottom + HANDLE_CLEARANCE, window.innerHeight - 44);
         const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
         setSel({ text, placement: "below", top, left });
       } else {
@@ -2623,7 +2631,10 @@ function SelectionCapture({ onAdd }) {
         const spaceLeft = rect.left;
         const placement = spaceRight >= spaceLeft ? "right" : "left";
         const top = Math.min(Math.max(rect.top + rect.height / 2, 30), window.innerHeight - 30);
-        const left = placement === "right" ? Math.min(rect.right + 8, window.innerWidth - 8) : Math.max(rect.left - 8, 8);
+        const left =
+          placement === "right"
+            ? Math.min(rect.right + HANDLE_CLEARANCE, window.innerWidth - 8)
+            : Math.max(rect.left - HANDLE_CLEARANCE, 8);
         setSel({ text, placement, top, left });
       }
     };
