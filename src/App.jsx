@@ -57,40 +57,43 @@ if (typeof window !== "undefined" && !window.storage) {
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`;
 
+// "Лавандовый рассвет" — the light theme. bgDeep doubles as textOnAccent
+// (the accent, mustard, is now a saturated purple, so text on top of it
+// needs to be light rather than the dark charcoal earlier themes used).
 const LIGHT_PALETTE = {
-  bg: "#E6EDEE",
-  bgGlow: "#F5F9F9",
-  chip: "#F0F5F5",
-  bgDeep: "#2E3236",
-  card: "#FBFAF7",
-  cardEdge: "#E6EAEA",
-  ink: "#2E3236",
-  mint: "#D98A28",
-  mintDeep: "#A85F1D",
-  mustard: "#D97B72",
-  fadeText: "#75808A",
-  cream: "#2E3236",
-  waiting: "#7C8C99",
+  bg: "#F1EEFB",
+  bgGlow: "#FAF8FF",
+  chip: "#EDE9FB",
+  bgDeep: "#FFFFFF",
+  card: "#FFFFFF",
+  cardEdge: "#DCD2F0",
+  ink: "#2A0E4E",
+  mint: "#9C5FC7",
+  mintDeep: "#5B2578",
+  mustard: "#7B3FA0",
+  fadeText: "#6A2C70",
+  cream: "#2A0E4E",
+  waiting: "#8A6FA0",
   danger: "#C1502E",
 };
 
-// The original scheme the app started with, before the light redesign —
-// brought back as the dark theme. Card stays light/cream even here, like a
-// physical card on a dark desk.
+// "Густой бархат" — the dark theme. Card stays light/lavender even here,
+// like a physical card on a dark desk — same principle the app has always
+// used, just re-tinted purple instead of cream.
 const DARK_PALETTE = {
-  bg: "#151A27",
-  bgGlow: "#1C2333",
-  chip: "#232B42",
-  bgDeep: "#23262B",
-  card: "#F5EFE0",
-  cardEdge: "#E3D9BE",
-  ink: "#23262B",
-  mint: "#4FA692",
-  mintDeep: "#2F7864",
-  mustard: "#E08F86",
-  fadeText: "#8B93A8",
-  cream: "#EFE9DA",
-  waiting: "#6C7A99",
+  bg: "#0F0518",
+  bgGlow: "#1B0C2E",
+  chip: "#241040",
+  bgDeep: "#150826",
+  card: "#E0D2F5",
+  cardEdge: "#D0BAE8",
+  ink: "#2A0E4E",
+  mint: "#C3A6FF",
+  mintDeep: "#5B2578",
+  mustard: "#9D7BFF",
+  fadeText: "#B794F4",
+  cream: "#EDE4FA",
+  waiting: "#8A6FA0",
   danger: "#C1502E",
 };
 
@@ -674,7 +677,7 @@ function PracticeView({ deck, resetScopeLabel }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(217,123,114,0.35)",
+                boxShadow: "0 8px 18px rgba(123,63,160,0.35)",
               }}
               aria-label="Предыдущая"
             >
@@ -689,7 +692,7 @@ function PracticeView({ deck, resetScopeLabel }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(217,123,114,0.35)",
+                boxShadow: "0 8px 18px rgba(123,63,160,0.35)",
               }}
               aria-label="Следующая"
             >
@@ -910,7 +913,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
         style={{
           fontFamily: "'IBM Plex Sans', sans-serif",
           color: PALETTE.mustard,
-          background: "rgba(217,123,114,0.1)",
+          background: "rgba(123,63,160,0.1)",
         }}
       >
         Можно вставить сразу целый список — каждая строка станет отдельной карточкой.
@@ -2084,7 +2087,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.max(0, p - 1))}
             disabled={idx === 0}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
             aria-label="Предыдущая страница"
           >
             <ChevronLeft size={24} strokeWidth={2.5} />
@@ -2096,7 +2099,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.min((pages?.length || 1) - 1, p + 1))}
             disabled={!pages || idx >= pages.length - 1}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
             aria-label="Следующая страница"
           >
             <ChevronRight size={24} strokeWidth={2.5} />
@@ -2279,7 +2282,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           <button
             onClick={onPrev}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
             aria-label="Предыдущая"
           >
             <ChevronLeft size={28} strokeWidth={2.5} />
@@ -2287,7 +2290,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           <button
             onClick={onNext}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
             aria-label="Следующая"
           >
             <ChevronRight size={28} strokeWidth={2.5} />
@@ -2673,7 +2676,7 @@ function SelectionCapture({ onAdd }) {
         background: PALETTE.mustard,
         color: PALETTE.bgDeep,
         fontFamily: "'IBM Plex Sans', sans-serif",
-        boxShadow: "0 8px 18px rgba(217,123,114,0.4)",
+        boxShadow: "0 8px 18px rgba(123,63,160,0.4)",
       }}
     >
       <Highlighter size={14} /> Добавить в Vocabulary
