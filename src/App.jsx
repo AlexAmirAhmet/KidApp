@@ -67,7 +67,7 @@ const LIGHT_PALETTE = {
   ink: "#2E3236",
   mint: "#D98A28",
   mintDeep: "#A85F1D",
-  mustard: "#E2932E",
+  mustard: "#D97B72",
   fadeText: "#75808A",
   cream: "#2E3236",
   waiting: "#7C8C99",
@@ -87,7 +87,7 @@ const DARK_PALETTE = {
   ink: "#23262B",
   mint: "#4FA692",
   mintDeep: "#2F7864",
-  mustard: "#E3A72E",
+  mustard: "#E08F86",
   fadeText: "#8B93A8",
   cream: "#EFE9DA",
   waiting: "#6C7A99",
@@ -674,7 +674,7 @@ function PracticeView({ deck, resetScopeLabel }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
+                boxShadow: "0 8px 18px rgba(217,123,114,0.35)",
               }}
               aria-label="Предыдущая"
             >
@@ -689,7 +689,7 @@ function PracticeView({ deck, resetScopeLabel }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(226,147,46,0.35)",
+                boxShadow: "0 8px 18px rgba(217,123,114,0.35)",
               }}
               aria-label="Следующая"
             >
@@ -910,7 +910,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
         style={{
           fontFamily: "'IBM Plex Sans', sans-serif",
           color: PALETTE.mustard,
-          background: "rgba(227,167,46,0.1)",
+          background: "rgba(217,123,114,0.1)",
         }}
       >
         Можно вставить сразу целый список — каждая строка станет отдельной карточкой.
@@ -986,7 +986,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
             className="flex items-center gap-1 text-sm"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
           >
-            <ArrowLeft size={16} /> Дашборд
+            <ArrowLeft size={16} /> Home
           </button>
 
           <div className="flex items-center gap-2">
@@ -1657,7 +1657,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
       <div className="max-w-md mx-auto w-full px-6 pt-8">
         <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            <ArrowLeft size={16} /> Мои цели
+            <ArrowLeft size={16} /> Home
           </button>
           <div className="flex items-center gap-2">
             {!renaming && (
@@ -2058,7 +2058,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
         <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Тексты
+          <ArrowLeft size={16} /> Home
         </button>
         <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
           {text.title}
@@ -2084,7 +2084,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.max(0, p - 1))}
             disabled={idx === 0}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
             aria-label="Предыдущая страница"
           >
             <ChevronLeft size={24} strokeWidth={2.5} />
@@ -2096,7 +2096,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.min((pages?.length || 1) - 1, p + 1))}
             disabled={!pages || idx >= pages.length - 1}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
             aria-label="Следующая страница"
           >
             <ChevronRight size={24} strokeWidth={2.5} />
@@ -2279,7 +2279,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           <button
             onClick={onPrev}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
             aria-label="Предыдущая"
           >
             <ChevronLeft size={28} strokeWidth={2.5} />
@@ -2287,7 +2287,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           <button
             onClick={onNext}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(226,147,46,0.35)" }}
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(217,123,114,0.35)" }}
             aria-label="Следующая"
           >
             <ChevronRight size={28} strokeWidth={2.5} />
@@ -2334,7 +2334,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
   const header = (
     <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
       <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-        <ArrowLeft size={16} /> Слова
+        <ArrowLeft size={16} /> Home
       </button>
       <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
         {text.title}
@@ -2673,7 +2673,7 @@ function SelectionCapture({ onAdd }) {
         background: PALETTE.mustard,
         color: PALETTE.bgDeep,
         fontFamily: "'IBM Plex Sans', sans-serif",
-        boxShadow: "0 8px 18px rgba(226,147,46,0.4)",
+        boxShadow: "0 8px 18px rgba(217,123,114,0.4)",
       }}
     >
       <Highlighter size={14} /> Добавить в Vocabulary
