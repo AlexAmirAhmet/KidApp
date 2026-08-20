@@ -2183,7 +2183,10 @@ function WordCardRow({ card, onOpen, emphasizeMeaning }) {
 // at any depth, jumps straight there instead of stepping back one level
 // at a time. Rendered above both the card list and the single-card flip
 // view, since the old text breadcrumb used to vanish in the latter.
-function WordTree({ wordTitle, tabs, tabIndex, onSelectTab, parentCard, onSelectParent, openCard }) {
+// The word's own screen title (rendered once, in the header above) is the
+// tree's root — this only draws the branches hanging off it, starting with
+// a connector so the tabs visibly stem from that title instead of floating.
+function WordTree({ tabs, tabIndex, onSelectTab, parentCard, onSelectParent, openCard }) {
   const PALETTE = useTheme();
   const connector = <ChevronDown size={12} style={{ color: PALETTE.fadeText, opacity: 0.55 }} />;
   const pillStyle = (isActive) => ({
@@ -2194,20 +2197,6 @@ function WordTree({ wordTitle, tabs, tabIndex, onSelectTab, parentCard, onSelect
 
   return (
     <div className="max-w-md mx-auto w-full px-6 flex flex-col items-center gap-1 mb-2">
-      <button
-        onClick={() => onSelectTab(tabIndex)}
-        className="truncate px-3 py-1 rounded-full text-xs"
-        style={{
-          fontFamily: "'Fraunces', serif",
-          fontStyle: "italic",
-          background: PALETTE.card,
-          color: PALETTE.cream,
-          border: `1px solid ${PALETTE.cardEdge}`,
-          maxWidth: "240px",
-        }}
-      >
-        {wordTitle}
-      </button>
       {connector}
       <div className="flex flex-wrap justify-center gap-1.5">
         {tabs.map((tab, i) => (
@@ -2348,7 +2337,6 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
 
   const tree = tabs.length > 0 && (
     <WordTree
-      wordTitle={text.title}
       tabs={tabs}
       tabIndex={tabIndex}
       onSelectTab={goToTab}
