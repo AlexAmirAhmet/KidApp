@@ -26,6 +26,8 @@ import {
   RotateCcw,
   BookMarked,
   ChevronDown,
+  Highlighter,
+  Copy,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -2517,7 +2519,242 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText = "Т�
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// App shell — theme, mode switch, routing between the four modes
+// VOCABULARY — a flat, ever-growing scratch list of highlighted words and
+// phrases, captured from anywhere text is shown in the app. No structure,
+// no translation, no parsing: just strings in, copy-all out.
+// ════════════════════════════════════════════════════════════════════════
+
+function useVocabulary() {
+  const [entries, setEntries] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("vocabulary-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setEntries(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setEntries(next);
+    try {
+      await window.storage.set("vocabulary-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const addEntry = useCallback(
+    (text) => {
+      const trimmed = (text || "").trim();
+      if (!trimmed) return;
+      persist([...entries, { id: uid(), text: trimmed }]);
+    },
+    [entries, persist]
+  );
+  const deleteEntry = useCallback(
+    (id) => {
+      persist(entries.filter((e) => e.id !== id));
+    },
+    [entries, persist]
+  );
+  const clearAll = useCallback(() => {
+    persist([]);
+  }, [persist]);
+
+  return { entries, addEntry, deleteEntry, clearAll };
+}
+
+// Mounted once at the app root regardless of mode/screen: watches the
+// document's text selection and floats a small "Добавить в Vocabulary"
+// button next to whatever the user just highlighted. onMouseDown/onTouchStart
+// call preventDefault so pressing the button doesn't first collapse the
+// selection it's meant to capture.
+function SelectionCapture({ onAdd }) {
+  const PALETTE = useTheme();
+  const [sel, setSel] = useState(null);
+
+  useEffect(() => {
+    const updateFromSelection = () => {
+      const selection = window.getSelection();
+      const text = selection && !selection.isCollapsed ? selection.toString().trim() : "";
+      if (!text || !selection.rangeCount) {
+        setSel(null);
+        return;
+      }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        setSel(null);
+        return;
+      }
+      const above = rect.top > 60;
+      const top = above ? rect.top - 10 : rect.bottom + 10;
+      const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
+      setSel({ text, top, left, above });
+    };
+    const hide = () => setSel(null);
+
+    document.addEventListener("selectionchange", updateFromSelection);
+    window.addEventListener("scroll", hide, true);
+    return () => {
+      document.removeEventListener("selectionchange", updateFromSelection);
+      window.removeEventListener("scroll", hide, true);
+    };
+  }, []);
+
+  if (!sel) return null;
+
+  const handleAdd = () => {
+    onAdd(sel.text);
+    window.getSelection()?.removeAllRanges();
+    setSel(null);
+  };
+
+  return (
+    <button
+      onMouseDown={(e) => e.preventDefault()}
+      onTouchStart={(e) => e.preventDefault()}
+      onClick={handleAdd}
+      className="fixed flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium whitespace-nowrap"
+      style={{
+        top: `${sel.top}px`,
+        left: `${sel.left}px`,
+        transform: sel.above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+        zIndex: 9999,
+        background: PALETTE.mustard,
+        color: PALETTE.bgDeep,
+        fontFamily: "'IBM Plex Sans', sans-serif",
+        boxShadow: "0 8px 18px rgba(226,147,46,0.4)",
+      }}
+    >
+      <Highlighter size={14} /> Добавить в Vocabulary
+    </button>
+  );
+}
+
+// The Vocabulary dashboard: no drill-down, no create form — entries only
+// ever arrive via SelectionCapture. Just a flat list with per-row delete,
+// a copy-everything action (the primary use case), and a guarded clear-all.
+function VocabularyList({ entries, onDelete, onClearAll }) {
+  const PALETTE = useTheme();
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(entries.map((e) => e.text).join("\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("Clipboard error", e);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-md px-6 pt-8 pb-10">
+      {entries.length === 0 ? (
+        <p className="text-sm text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          Пока пусто — выдели любой текст в приложении и нажми «Добавить в Vocabulary».
+        </p>
+      ) : (
+        <>
+          <button
+            onClick={handleCopyAll}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4"
+            style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать всё (${entries.length})`}
+          </button>
+
+          {entries.map((entry) => (
+            <div
+              key={entry.id}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
+              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+            >
+              <p
+                className="min-w-0 flex-1"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.cream, fontSize: "0.95rem", overflowWrap: "break-word" }}
+              >
+                {entry.text}
+              </p>
+              {confirmDeleteId === entry.id ? (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      onDelete(entry.id);
+                      setConfirmDeleteId(null);
+                    }}
+                    className="text-xs px-2 py-1 rounded-full"
+                    style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Да
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="text-xs px-2 py-1 rounded-full"
+                    style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDeleteId(entry.id)} title="Удалить" className="p-1.5 shrink-0" style={{ color: "#5B6275" }}>
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+          ))}
+
+          <div className="mt-4">
+            {confirmClear ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+                  Удалить весь список ({entries.length}) безвозвратно?
+                </span>
+                <button
+                  onClick={() => {
+                    onClearAll();
+                    setConfirmClear(false);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                  style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+                >
+                  Да
+                </button>
+                <button
+                  onClick={() => setConfirmClear(false)}
+                  className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                  style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+                >
+                  Отмена
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmClear(true)} className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}>
+                Очистить весь список
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// App shell — theme, mode switch, routing between the five modes
 // ════════════════════════════════════════════════════════════════════════
 
 function ModeSwitch({ mode, onChange }) {
@@ -2527,6 +2764,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "focus", label: "Мои цели", Icon: Target },
     { key: "pages", label: "Pages", Icon: BookOpen },
     { key: "words", label: "Слово", Icon: BookMarked },
+    { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -2553,6 +2791,7 @@ export default function App() {
   const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren } = useGoals();
   const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
+  const vocab = useVocabulary();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -2570,7 +2809,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && (res.value === "language" || res.value === "focus" || res.value === "pages" || res.value === "words")) setMode(res.value);
+        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary"].includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -2627,6 +2866,7 @@ export default function App() {
     <TranscriptionContext.Provider value={[showTranscription, setShowTranscription]}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
+        <SelectionCapture onAdd={vocab.addEntry} />
 
         {mode === "pages" && openText ? (
           <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
@@ -2696,7 +2936,15 @@ export default function App() {
                 Small pieces. Big change.
               </p>
               <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: theme.cream, fontSize: "2.4rem" }}>
-                {mode === "language" ? "Твои колоды" : mode === "focus" ? "Твои цели" : mode === "words" ? "Твои слова" : "Твои тексты"}
+                {mode === "language"
+                  ? "Твои колоды"
+                  : mode === "focus"
+                  ? "Твои цели"
+                  : mode === "words"
+                  ? "Твои слова"
+                  : mode === "vocabulary"
+                  ? "Vocabulary"
+                  : "Твои тексты"}
               </h1>
             </div>
 
@@ -2721,6 +2969,8 @@ export default function App() {
                 createLabel="Новое слово"
                 rowIcon={BookMarked}
               />
+            ) : mode === "vocabulary" ? (
+              <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
             ) : (
               <PagesList
                 texts={texts}
