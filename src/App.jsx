@@ -59,47 +59,57 @@ if (typeof window !== "undefined" && !window.storage) {
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`;
 
-// "Лавандовый рассвет" — the light theme. bgDeep doubles as textOnAccent
-// (the accent, mustard, is now a saturated purple, so text on top of it
-// needs to be light rather than the dark charcoal earlier themes used).
+// Neumorphic surfaces: page, cards, and chips all share one base tone per
+// theme — shape reads through soft dual-offset shadows (a light source
+// top-left, its shadow bottom-right), not through fill-color contrast.
+// bg/chip/card are deliberately identical: every "surface" is carved from
+// the same material as the page behind it. cardEdge stays a faint neutral
+// tint (not fully transparent) so borderless affordances — the dashed
+// "create" invite, an unchecked checkbox's outline — still read without
+// needing shadows of their own. shadowLight/shadowDark are the two offset
+// shadows raised elements use; cardHighlight is the thin top-edge sheen
+// layered on top of the largest raised surfaces (flashcards, deck tiles).
+// The one color accent anywhere in the app is danger (#D93C3C, red) —
+// reserved for delete/destructive actions; every shadow and every other
+// accent role (mustard, mint, waiting) is a neutral gray-blue, never a hue.
 const LIGHT_PALETTE = {
-  bg: "#F1EEFB",
-  bgGlow: "#FAF8FF",
-  chip: "#EDE9FB",
-  bgDeep: "#FFFFFF",
-  card: "#FFFFFF",
-  cardEdge: "#DCD2F0",
-  cardHighlight: "rgba(255,255,255,0.8)",
-  ink: "#2A0E4E",
-  mint: "#9C5FC7",
-  mintDeep: "#5B2578",
-  mustard: "#7B3FA0",
-  fadeText: "#6A2C70",
-  cream: "#2A0E4E",
-  waiting: "#8A6FA0",
-  danger: "#C1502E",
+  bg: "#E8ECF1",
+  bgGlow: "#EEF2F6",
+  chip: "#E8ECF1",
+  bgDeep: "#F7F9FB",
+  card: "#E8ECF1",
+  cardEdge: "#D3D9E1",
+  cardHighlight: "rgba(255,255,255,0.85)",
+  shadowLight: "rgba(255,255,255,0.85)",
+  shadowDark: "rgba(163,177,198,0.55)",
+  ink: "#2E3742",
+  mint: "#4A5568",
+  mintDeep: "#3D4652",
+  mustard: "#3D4652",
+  fadeText: "#7B8794",
+  cream: "#2E3742",
+  waiting: "#9AA5B1",
+  danger: "#D93C3C",
 };
 
-// "Густой бархат" — the dark theme. Every card-style surface (elevated
-// tiles, flashcards, the Pages reading surface, form fields) inverts along
-// with everything else: dark fill, light text — same rule the list-row
-// "chip" surfaces already followed, now applied without exception.
 const DARK_PALETTE = {
-  bg: "#0F0518",
-  bgGlow: "#1B0C2E",
-  chip: "#241040",
-  bgDeep: "#150826",
-  card: "#2E1652",
-  cardEdge: "#D0BAE8",
-  cardHighlight: "rgba(255,255,255,0.08)",
-  ink: "#EDE4FA",
-  mint: "#C3A6FF",
-  mintDeep: "#C3A6FF",
-  mustard: "#9D7BFF",
-  fadeText: "#B794F4",
-  cream: "#EDE4FA",
-  waiting: "#AC9BC7",
-  danger: "#C1502E",
+  bg: "#1E2530",
+  bgGlow: "#242C38",
+  chip: "#1E2530",
+  bgDeep: "#F0F2F5",
+  card: "#1E2530",
+  cardEdge: "#2C3542",
+  cardHighlight: "rgba(255,255,255,0.05)",
+  shadowLight: "rgba(255,255,255,0.05)",
+  shadowDark: "rgba(0,0,0,0.5)",
+  ink: "#EDF0F3",
+  mint: "#B0B8C2",
+  mintDeep: "#C7CDD5",
+  mustard: "#4A5568",
+  fadeText: "#8B94A0",
+  cream: "#EDF0F3",
+  waiting: "#626B78",
+  danger: "#D93C3C",
 };
 
 const ThemeContext = createContext(LIGHT_PALETTE);
@@ -113,6 +123,222 @@ function useTheme() {
 const TranscriptionContext = createContext([false, () => {}]);
 function useTranscription() {
   return useContext(TranscriptionContext);
+}
+
+// Same persisted-app-wide-toggle pattern as transcription: "Реверс" (deck
+// practice card direction) survives leaving and re-entering Изучение языка,
+// across sessions, until the user flips it again themselves.
+const ReversedContext = createContext([false, () => {}]);
+function useReversed() {
+  return useContext(ReversedContext);
+}
+
+// App-wide interface language (RU/EN), persisted like theme/transcription.
+// Every translated string is looked up by its Russian source text as the
+// key — the app was written entirely in Russian, so the existing copy
+// doubles as a stable, readable key without inventing a parallel key set.
+// A key with no "en" entry (not yet catalogued) or no interpolation just
+// falls back to the Russian text itself, so missing entries degrade to
+// Russian rather than breaking.
+const LanguageContext = createContext(["ru", () => {}]);
+function useLanguage() {
+  return useContext(LanguageContext);
+}
+
+const STRINGS = {
+  "Спецификации": { en: "Instructions" },
+  "Изучение языка": { en: "Language" },
+  "Мои цели": { en: "Focus" },
+  "Слово": { en: "Word" },
+  "Твои колоды": { en: "Your decks" },
+  "Твои цели": { en: "Your goals" },
+  "Твои слова": { en: "Your words" },
+  "Твои тексты": { en: "Your texts" },
+  "Small pieces. Big change.": { en: "Small pieces. Big change." },
+  "Тёмная тема": { en: "Dark theme" },
+  "Светлая тема": { en: "Light theme" },
+  "Сохранить": { en: "Save" },
+  "Отмена": { en: "Cancel" },
+  "Назад": { en: "Back" },
+  "Home": { en: "Home" },
+  "Да": { en: "Yes" },
+  "Удалить": { en: "Delete" },
+  "Редактировать": { en: "Edit" },
+  "редактировать": { en: "edit" },
+  "транскрипция": { en: "transcription" },
+  "Реверс": { en: "Reverse" },
+  "перемешать колоду": { en: "shuffle deck" },
+  "обнулить активные": { en: "reset active" },
+  "Выделить всё": { en: "Select all" },
+  "Снять выделение": { en: "Deselect all" },
+  "Скопировано": { en: "Copied" },
+  "Удалить выбранное": { en: "Delete selected" },
+  "Копировать (N)": { ru: (n) => `Копировать (${n})`, en: (n) => `Copy (${n})` },
+  "Удалить N записей?": {
+    ru: (n) => `Удалить ${n} ${pluralRu(n, "запись", "записи", "записей")}?`,
+    en: (n) => `Delete ${n} ${n === 1 ? "record" : "records"}?`,
+  },
+  "Выбрать": { en: "Select" },
+  "Новая спецификация": { en: "New instruction" },
+  "Скопируй текст перед вставкой": { en: "Copy text before pasting" },
+  "Пока пусто — нажми «+», чтобы быстро набросать первую спецификацию.": {
+    en: "Nothing yet — tap “+” to jot down your first instruction.",
+  },
+  "↑ в долгий ящик": { en: "↑ to the long box" },
+  "нет транскрипции": { en: "no transcription" },
+  "Перевод не указан": { en: "No translation given" },
+  "тап — вернуть · смахни вверх — в долгий ящик": { en: "tap to flip back · swipe up for the long box" },
+  "тап — перевернуть · смахни вверх — в долгий ящик": { en: "tap to flip · swipe up for the long box" },
+  "Английский текст *": { en: "English text *" },
+  "Перевод": { en: "Translation" },
+  "Транскрипция": { en: "Transcription" },
+  "Заметка (когда используется)": { en: "Note (when it's used)" },
+  "Обнулить актив цели «N»?": {
+    ru: (name) => `Обнулить актив цели «${name}»? Все активные карточки вернутся в долгий ящик.`,
+    en: (name) => `Reset active cards for the goal “${name}”? All active cards will return to the long box.`,
+  },
+  "Да, обнулить": { en: "Yes, reset" },
+  "В активной колоде пока пусто.": { en: "Nothing active in this deck yet." },
+  "Загляни во вкладку «Долгий ящик» и перенеси туда карточки, которые готов повторять.": {
+    en: "Check the “Long box” tab and move over the cards you're ready to practice.",
+  },
+  "Обнулить активные": { en: "Reset active" },
+  "обнулить активные": { en: "reset active" },
+  "Редактировать карточку": { en: "Edit card" },
+  "Предыдущая": { en: "Previous" },
+  "Следующая": { en: "Next" },
+  "Поменять местами лицевую и обратную стороны карточки": { en: "Swap the card's front and back side" },
+  ": вкл": { en: ": on" },
+  "Удалить навсегда?": { en: "Delete forever?" },
+  "Перенести в активную колоду": { en: "Move to active deck" },
+  "Отложить в долгий ящик": { en: "Set aside to the long box" },
+  "Долгий ящик (N)": { ru: (n) => `Долгий ящик (${n})`, en: (n) => `Long box (${n})` },
+  "всё в актив": { en: "all to active" },
+  "Пусто. Новые карточки, которые ты добавляешь, сначала попадают сюда — и карточки, которые ты уже знаешь и отложил из актива.": {
+    en: "Empty. New cards you add land here first — as do cards you already know and set aside from active.",
+  },
+  "В активной колоде (N)": { ru: (n) => `В активной колоде (${n})`, en: (n) => `In the active deck (${n})` },
+  "всё в долгий ящик": { en: "all to the long box" },
+  "Пока ничего не выбрано для повторения.": { en: "Nothing picked for practice yet." },
+  "Можно вставить сразу целый список — каждая строка станет отдельной карточкой.": {
+    en: "You can paste a whole list at once — each line becomes its own card.",
+  },
+  "Формат одной строки:": { en: "Format for one line:" },
+  "текст - перевод - транскрипция - заметка": { en: "text - translation - transcription - note" },
+  "Обязательно только первое поле, остальное — по желанию.": { en: "Only the first field is required, the rest are optional." },
+  "How's it going? - Как дела? - хаузит гоуин - неформальное приветствие среди друзей\nresilient - стойкий - ризИльент\nworthwhile\nIt's up to you. - Решать тебе.": {
+    en: "How's it going? - How are you? - howz it goin - an informal greeting among friends\nresilient\nworthwhile\nIt's up to you.",
+  },
+  "строк: N": { ru: (n) => `строк: ${n}`, en: (n) => `lines: ${n}` },
+  "вставь одну или несколько строк": { en: "paste one or more lines" },
+  "Добавлено": { en: "Added" },
+  "Добавить N карточек": { ru: (n) => `Добавить ${n} карточек`, en: (n) => `Add ${n} cards` },
+  "Добавить в долгий ящик": { en: "Add to the long box" },
+  "Добавить": { en: "Add" },
+  "Повторение": { en: "Practice" },
+  "Долгий ящик": { en: "Long box" },
+  "Переименовать колоду": { en: "Rename deck" },
+  "Удалить колоду «N»": { ru: (name) => `Удалить колоду «${name}»`, en: (name) => `Delete deck “${name}”` },
+  "Удалить колоду «N» навсегда, вместе со всеми карточками?": {
+    ru: (name) => `Удалить колоду «${name}» навсегда, вместе со всеми карточками?`,
+    en: (name) => `Delete the deck “${name}” forever, along with all its cards?`,
+  },
+  "Создать": { en: "Create" },
+  "Колод пока нет. Создай первую, чтобы начать добавлять карточки.": {
+    en: "No decks yet. Create your first one to start adding cards.",
+  },
+  "Создать колоду": { en: "Create deck" },
+  "Название колоды": { en: "Deck name" },
+  "N активных": { ru: (n) => `${n} активных`, en: (n) => `${n} active` },
+  "N в долгом ящике": { ru: (n) => `${n} в долгом ящике`, en: (n) => `${n} in the long box` },
+  "Новая колода": { en: "New deck" },
+  "N активных · N всего": { ru: (a, b) => `${a} активных · ${b} всего`, en: (a, b) => `${a} active · ${b} total` },
+  "Удалить?": { en: "Delete?" },
+  "Разбить на карточки": { en: "Split into cards" },
+  "разбить на подкарточки": { en: "split into sub-cards" },
+  "Переименовать цель": { en: "Rename goal" },
+  "Наверх": { en: "Up" },
+  "Повторение (N активных во всей цели)": {
+    ru: (n) => `Повторение (${n} активных во всей цели)`,
+    en: (n) => `Practice (${n} active across the goal)`,
+  },
+  "Здесь пока пусто. Добавь карточки — каждую потом можно «разбить» на подкатегории.": {
+    en: "Nothing here yet. Add cards — each one can later be “split” into subcategories.",
+  },
+  "Добавить карточки сюда": { en: "Add cards here" },
+  "Удалить цель «N»": { ru: (name) => `Удалить цель «${name}»`, en: (name) => `Delete goal “${name}”` },
+  "Удалить цель «N» навсегда, вместе со всем деревом?": {
+    ru: (name) => `Удалить цель «${name}» навсегда, вместе со всем деревом?`,
+    en: (name) => `Delete the goal “${name}” forever, along with its whole tree?`,
+  },
+  "Целей пока нет. Создай первую — язык, молитвы, личный бренд, любой проект.": {
+    en: "No goals yet. Create your first one — language, prayer, personal brand, any project.",
+  },
+  "Создать цель": { en: "Create goal" },
+  "Название цели": { en: "Goal name" },
+  "N карточек всего": { ru: (n) => `${n} карточек всего`, en: (n) => `${n} cards total` },
+  "Новая цель": { en: "New goal" },
+  "Название текста": { en: "Text title" },
+  "Вставь текст целиком — разбивка на страницы произойдёт автоматически": {
+    en: "Paste the whole text — it'll be split into pages automatically",
+  },
+  "Разбиваю на страницы…": { en: "Splitting into pages…" },
+  "Предыдущая страница": { en: "Previous page" },
+  "Следующая страница": { en: "Next page" },
+  "Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.": {
+    en: "No texts yet. Paste your first one — paragraphs, excerpts, anything long.",
+  },
+  "Добавить текст": { en: "Add text" },
+  "В этом тексте не найдено ни одного заголовка «##».": { en: "No “##” headings were found in this text." },
+  "Добавить в Vocabulary": { en: "Add to Vocabulary" },
+  "Пока пусто — выдели любой текст в приложении и нажми «Добавить в Vocabulary».": {
+    en: "Nothing yet — select any text in the app and tap “Add to Vocabulary”.",
+  },
+  "Скопировать всё (N)": { ru: (n) => `Скопировать всё (${n})`, en: (n) => `Copy all (${n})` },
+  "Удалить весь список (N) безвозвратно?": {
+    ru: (n) => `Удалить весь список (${n}) безвозвратно?`,
+    en: (n) => `Delete the whole list (${n}) permanently?`,
+  },
+  "Очистить весь список": { en: "Clear the whole list" },
+  "Название слова": { en: "Word title" },
+  "Разметка: «## Заголовок» — новая вкладка; обычная строка — карточка (english - перевод - транскрипция - контекст); строка с «>» — пример-потомок предыдущей карточки": {
+    en: "Markup: “## Heading” starts a new tab; a plain line is a card (english - translation - transcription - context); a line starting with “>” is the previous card's nested example",
+  },
+  "Слов пока нет. Добавь первое — с разметкой «## / > ».": { en: "No words yet. Add your first one — using “## / >” markup." },
+  "Новое слово": { en: "New word" },
+  "В этом разделе пока нет карточек.": { en: "No cards in this section yet." },
+};
+
+// t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
+// interpolated string, for entries whose value is a {ru, en} function pair.
+function translate(lang, key, ...args) {
+  const entry = STRINGS[key];
+  if (!entry) return key;
+  const val = lang === "en" && entry.en !== undefined ? entry.en : entry.ru ?? key;
+  return typeof val === "function" ? val(...args) : val;
+}
+
+// A component consuming its own Provider still reads the context's default
+// value, not the state it's about to provide — App() itself builds `t`
+// from its local `lang` state directly instead of this hook, for that
+// reason. Every descendant uses useT() as normal.
+function useT() {
+  const [lang] = useLanguage();
+  return (key, ...args) => translate(lang, key, ...args);
+}
+
+function LanguageToggle({ lang, onToggle }) {
+  const PALETTE = useTheme();
+  return (
+    <button
+      onClick={onToggle}
+      title={lang === "ru" ? "Switch to English" : "Переключить на русский"}
+      className="px-2.5 py-2 rounded-full flex items-center justify-center text-xs font-medium"
+      style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif", letterSpacing: "0.03em" }}
+    >
+      {lang === "ru" ? "EN" : "RU"}
+    </button>
+  );
 }
 
 function ThemeToggle({ isDark, onToggle, size = 15 }) {
@@ -194,6 +420,15 @@ function parseWordDocument(body) {
   }
 
   return tabs;
+}
+
+// Russian plural agreement: 1 запись, 2-4 записи, 5+/11-14 записей.
+function pluralRu(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function shuffleArr(arr) {
@@ -280,40 +515,79 @@ function useDecks() {
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
 function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp, reversed }) {
   const PALETTE = useTheme();
+  const t = useT();
   const showEnglishSide = reversed ? flipped : !flipped;
   const [dy, setDy] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const drag = useRef({ startY: 0, startX: 0, suppressClick: false });
+  const cardRef = useRef(null);
+  const drag = useRef({ startY: 0, startX: 0, active: false, suppressClick: false });
 
-  const onTouchStart = (e) => {
-    const t = e.touches[0];
-    drag.current.startY = t.clientY;
-    drag.current.startX = t.clientX;
-    drag.current.suppressClick = false;
-    setDragging(true);
-  };
-  const onTouchMove = (e) => {
-    if (!e.touches[0]) return;
-    const t = e.touches[0];
-    const dyNow = t.clientY - drag.current.startY;
-    const dxNow = t.clientX - drag.current.startX;
-    // Only react to a clearly vertical gesture — ignore diagonal/sideways drift entirely
-    if (Math.abs(dyNow) > Math.abs(dxNow) * 1.5) {
-      setDy(dyNow);
-    } else {
-      setDy(0);
-    }
-  };
-  const onTouchEnd = () => {
-    setDragging(false);
-    setDy((currentDy) => {
-      if (currentDy < -90) {
-        drag.current.suppressClick = true;
-        onSwipeUp && onSwipeUp();
+  // Native (non-passive) listeners, not React's onTouch* props — only a
+  // non-passive touchmove listener can call preventDefault, which is what
+  // stops the browser from stepping in with its own gesture (page scroll,
+  // pull-to-refresh, edge-swipe-back) once a drag has moved far enough to
+  // not be a tap. Without that claim, an unrecognized gesture (anything but
+  // straight-up) could get handed to the browser mid-drag — our touchend
+  // never fires (a touchcancel does, or nothing), leaving the card stuck
+  // partway, or the browser's own gesture fires instead (e.g. a pull-to-
+  // refresh reload, landing back on the dashboard). Claiming the touch and
+  // always resolving through our own touchend/touchcancel avoids both.
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      drag.current = { startY: t.clientY, startX: t.clientX, active: true, suppressClick: false };
+      setDragging(true);
+    };
+
+    const onTouchMove = (e) => {
+      if (!drag.current.active || !e.touches[0]) return;
+      const t = e.touches[0];
+      const dyNow = t.clientY - drag.current.startY;
+      const dxNow = t.clientX - drag.current.startX;
+      // Only a clear upward drag has an action bound to it (swipe to the
+      // long box). Everything else — down, sideways, diagonal — has none,
+      // so the card stays fully put: no partial visual response.
+      const isSwipeUp = dyNow < 0 && Math.abs(dyNow) > Math.abs(dxNow) * 1.5;
+      if (isSwipeUp) {
+        e.preventDefault();
+        setDy(dyNow);
+      } else {
+        // Past a small threshold this is a real drag, not tap jitter —
+        // claim it so the browser doesn't hijack it natively, but the
+        // card itself still doesn't move.
+        if (Math.abs(dyNow) > 8 || Math.abs(dxNow) > 8) e.preventDefault();
+        setDy(0);
       }
-      return 0;
-    });
-  };
+    };
+
+    const endDrag = () => {
+      drag.current.active = false;
+      setDragging(false);
+      setDy((currentDy) => {
+        if (currentDy < -90) {
+          drag.current.suppressClick = true;
+          onSwipeUp && onSwipeUp();
+        }
+        return 0;
+      });
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", endDrag, { passive: true });
+    el.addEventListener("touchcancel", endDrag, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", endDrag);
+      el.removeEventListener("touchcancel", endDrag);
+    };
+  }, [onSwipeUp]);
+
   const handleClick = () => {
     if (drag.current.suppressClick) {
       drag.current.suppressClick = false;
@@ -326,9 +600,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
 
   return (
     <div
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      ref={cardRef}
       onClick={handleClick}
       className="relative w-full max-w-md cursor-pointer"
       style={{ perspective: "1200px" }}
@@ -343,7 +615,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
             opacity: swipeProgress,
           }}
         >
-          ↑ в долгий ящик
+          {t("↑ в долгий ящик")}
         </div>
       )}
       <div
@@ -351,7 +623,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
         style={{
           background: PALETTE.cardEdge,
           transform: `rotate(${rotation + 3}deg) translateY(6px)`,
-          boxShadow: "0 4px 14px rgba(140,155,165,0.25)",
+          boxShadow: `4px 4px 10px ${PALETTE.shadowDark}`,
         }}
       />
       <div
@@ -362,7 +634,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
           transition: dragging ? "none" : "transform 0.35s cubic-bezier(.2,.8,.3,1)",
           opacity: 1 - swipeProgress * 0.5,
           minHeight: "260px",
-          boxShadow: `0 16px 32px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`,
+          boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
           border: `1px solid ${PALETTE.cardEdge}`,
         }}
       >
@@ -399,7 +671,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
                   letterSpacing: "0.02em",
                 }}
               >
-                [{item.tr || "нет транскрипции"}]
+                [{item.tr || t("нет транскрипции")}]
               </p>
             )}
           </>
@@ -414,7 +686,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
                 lineHeight: 1.4,
               }}
             >
-              {item.ru || "Перевод не указан"}
+              {item.ru || t("Перевод не указан")}
             </p>
             {item.note && (
               <p
@@ -436,7 +708,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
           className="absolute bottom-4 text-xs tracking-wide"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#AEB8BE" }}
         >
-          {flipped ? "тап — вернуть · смахни вверх — в долгий ящик" : "тап — перевернуть · смахни вверх — в долгий ящик"}
+          {flipped ? t("тап — вернуть · смахни вверх — в долгий ящик") : t("тап — перевернуть · смахни вверх — в долгий ящик")}
         </p>
       </div>
     </div>
@@ -444,8 +716,9 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
 }
 
 // ---- Reusable structured edit/create form: en (required), ru, tr, note ----
-function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" }) {
+function CardForm({ initial, onSave, onCancel, saveLabel }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [en, setEn] = useState(initial?.en || "");
   const [ru, setRu] = useState(initial?.ru || "");
   const [tr, setTr] = useState(initial?.tr || "");
@@ -473,7 +746,7 @@ function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" 
   return (
     <div className="w-full max-w-md flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <label style={labelStyle}>Английский текст *</label>
+        <label style={labelStyle}>{t("Английский текст *")}</label>
         <input
           autoFocus
           value={en}
@@ -483,15 +756,15 @@ function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" 
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label style={labelStyle}>Перевод</label>
+        <label style={labelStyle}>{t("Перевод")}</label>
         <input value={ru} onChange={(e) => setRu(e.target.value)} className="rounded-xl px-3 py-2 outline-none" style={fieldStyle} />
       </div>
       <div className="flex flex-col gap-1">
-        <label style={labelStyle}>Транскрипция</label>
+        <label style={labelStyle}>{t("Транскрипция")}</label>
         <input value={tr} onChange={(e) => setTr(e.target.value)} className="rounded-xl px-3 py-2 outline-none" style={fieldStyle} />
       </div>
       <div className="flex flex-col gap-1">
-        <label style={labelStyle}>Заметка (когда используется)</label>
+        <label style={labelStyle}>{t("Заметка (когда используется)")}</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -507,24 +780,25 @@ function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" 
           className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
           style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          {saveLabel}
+          {saveLabel ?? t("Сохранить")}
         </button>
         <button
           onClick={onCancel}
           className="flex-1 rounded-full py-2.5 text-sm"
           style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Отмена
+          {t("Отмена")}
         </button>
       </div>
     </div>
   );
 }
 
-// `resetScopeLabel`, when provided (Focus mode only), shows a "reset all
+// `resetScopeName`, when provided (Focus mode only), shows a "reset all
 // active back to waiting" button scoped to the whole current goal tree.
-function PracticeView({ deck, resetScopeLabel, deckKey }) {
+function PracticeView({ deck, resetScopeName, deckKey }) {
   const PALETTE = useTheme();
+  const t = useT();
   const activeItems = deck.items.filter((i) => i.status === "active");
   // Sequence tracked by id, not index — so removing/editing one card in
   // place (swiping it to the long box, saving an edit) never has to guess
@@ -539,7 +813,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
   const [showTranscription, setShowTranscription] = useTranscription();
   const [editing, setEditing] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [reversed, setReversed] = useState(false);
+  const [reversed, setReversed] = useReversed();
 
   useEffect(() => {
     setOrderIds(deck.items.filter((i) => i.status === "active").map((i) => i.id));
@@ -558,7 +832,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-20 px-6 text-center">
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger, maxWidth: "320px" }}>
-          Обнулить актив {resetScopeLabel}? Все активные карточки вернутся в долгий ящик.
+          {t("Обнулить актив цели «N»?", resetScopeName)}
         </p>
         <div className="flex gap-2">
           <button
@@ -566,14 +840,14 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
             className="text-sm px-4 py-2 rounded-full"
             style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Да, обнулить
+            {t("Да, обнулить")}
           </button>
           <button
             onClick={() => setConfirmReset(false)}
             className="text-sm px-4 py-2 rounded-full"
             style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Отмена
+            {t("Отмена")}
           </button>
         </div>
       </div>
@@ -584,10 +858,10 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 px-6 text-center">
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          В активной колоде пока пусто.
+          {t("В активной колоде пока пусто.")}
         </p>
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>
-          Загляни во вкладку «Долгий ящик» и перенеси туда карточки, которые готов повторять.
+          {t("Загляни во вкладку «Долгий ящик» и перенеси туда карточки, которые готов повторять.")}
         </p>
       </div>
     );
@@ -635,19 +909,19 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
           {pos + 1} / {orderIds.length}
         </span>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {resetScopeLabel && (
+          {resetScopeName && (
             <button
               onClick={() => setConfirmReset(true)}
-              title="Обнулить активные"
+              title={t("Обнулить активные")}
               className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
               style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.fadeText }}
             >
-              <RotateCcw size={14} /> обнулить активные
+              <RotateCcw size={14} /> {t("обнулить активные")}
             </button>
           )}
           <button
             onClick={() => setEditing((e) => !e)}
-            title="Редактировать карточку"
+            title={t("Редактировать карточку")}
             className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
             style={{
               fontFamily: "'IBM Plex Sans', sans-serif",
@@ -655,7 +929,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
               color: editing ? PALETTE.bgDeep : PALETTE.fadeText,
             }}
           >
-            <Pencil size={14} /> редактировать
+            <Pencil size={14} /> {t("редактировать")}
           </button>
           <button
             onClick={() => setShowTranscription((s) => !s)}
@@ -666,7 +940,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
               color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText,
             }}
           >
-            <Type size={14} /> транскрипция
+            <Type size={14} /> {t("транскрипция")}
           </button>
         </div>
       </div>
@@ -695,9 +969,9 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(123,63,160,0.35)",
+                boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
               }}
-              aria-label="Предыдущая"
+              aria-label={t("Предыдущая")}
             >
               <ChevronLeft size={28} strokeWidth={2.5} />
             </button>
@@ -710,9 +984,9 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
                 height: "56px",
                 background: PALETTE.mustard,
                 color: PALETTE.bgDeep,
-                boxShadow: "0 8px 18px rgba(123,63,160,0.35)",
+                boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
               }}
-              aria-label="Следующая"
+              aria-label={t("Следующая")}
             >
               <ChevronRight size={28} strokeWidth={2.5} />
             </button>
@@ -723,7 +997,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
               setReversed((r) => !r);
               setFlipped(false);
             }}
-            title="Поменять местами лицевую и обратную стороны карточки"
+            title={t("Поменять местами лицевую и обратную стороны карточки")}
             className="flex items-center gap-2 mt-4 text-sm px-3 py-1.5 rounded-full"
             style={{
               fontFamily: "'IBM Plex Sans', sans-serif",
@@ -731,7 +1005,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
               color: reversed ? PALETTE.bgDeep : PALETTE.fadeText,
             }}
           >
-            <RotateCcw size={14} /> Реверс{reversed ? ": вкл" : ""}
+            <RotateCcw size={14} /> {t("Реверс")}{reversed ? t(": вкл") : ""}
           </button>
 
           <button
@@ -739,7 +1013,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
             className="flex items-center gap-2 mt-4 text-sm"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
           >
-            <Shuffle size={15} /> перемешать колоду
+            <Shuffle size={15} /> {t("перемешать колоду")}
           </button>
         </>
       )}
@@ -749,6 +1023,7 @@ function PracticeView({ deck, resetScopeLabel, deckKey }) {
 
 function ListView({ deck }) {
   const PALETTE = useTheme();
+  const t = useT();
   const waiting = deck.items.filter((i) => i.status === "waiting");
   const active = deck.items.filter((i) => i.status === "active");
   const [confirmId, setConfirmId] = useState(null);
@@ -773,7 +1048,7 @@ function ListView({ deck }) {
       style={{
         background: PALETTE.chip,
         border: `1px solid ${PALETTE.cardEdge}`,
-        boxShadow: "0 2px 8px rgba(140,155,165,0.12)",
+        boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
       }}
     >
       <div className="min-w-0">
@@ -799,21 +1074,21 @@ function ListView({ deck }) {
             className="text-xs"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}
           >
-            Удалить навсегда?
+            {t("Удалить навсегда?")}
           </span>
           <button
             onClick={() => removeItem(item.id)}
             className="text-xs px-2 py-1 rounded-full"
             style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Да
+            {t("Да")}
           </button>
           <button
             onClick={() => setConfirmId(null)}
             className="text-xs px-2 py-1 rounded-full"
             style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Отмена
+            {t("Отмена")}
           </button>
         </div>
       ) : (
@@ -821,16 +1096,16 @@ function ListView({ deck }) {
           {item.status === "waiting" ? (
             <button
               onClick={() => moveTo(item.id, "active")}
-              title="Перенести в активную колоду"
+              title={t("Перенести в активную колоду")}
               className="p-1.5 rounded-full"
-              style={{ color: PALETTE.mint, background: "rgba(217,138,40,0.12)" }}
+              style={{ color: PALETTE.mint, background: "rgba(120,132,148,0.16)" }}
             >
               <ArrowRightCircle size={22} />
             </button>
           ) : (
             <button
               onClick={() => moveTo(item.id, "waiting")}
-              title="Отложить в долгий ящик"
+              title={t("Отложить в долгий ящик")}
               className="p-1.5 rounded-full"
               style={{ color: PALETTE.waiting, background: "rgba(124,140,153,0.14)" }}
             >
@@ -845,7 +1120,7 @@ function ListView({ deck }) {
 
           <button
             onClick={() => setConfirmId(item.id)}
-            title="Удалить"
+            title={t("Удалить")}
             className="p-1.5"
             style={{ color: "#5B6275" }}
           >
@@ -863,7 +1138,7 @@ function ListView({ deck }) {
           className="flex items-center gap-2"
           style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}
         >
-          <Layers size={18} style={{ color: PALETTE.waiting }} /> Долгий ящик ({waiting.length})
+          <Layers size={18} style={{ color: PALETTE.waiting }} /> {t("Долгий ящик (N)", waiting.length)}
         </h3>
         {waiting.length > 0 && (
           <button
@@ -871,7 +1146,7 @@ function ListView({ deck }) {
             className="text-xs px-3 py-1.5 rounded-full"
             style={{ background: PALETTE.mint, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            всё в актив
+            {t("всё в актив")}
           </button>
         )}
       </div>
@@ -880,8 +1155,7 @@ function ListView({ deck }) {
           className="mb-6 text-sm"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
         >
-          Пусто. Новые карточки, которые ты добавляешь, сначала попадают сюда — и карточки, которые ты уже
-          знаешь и отложил из актива.
+          {t("Пусто. Новые карточки, которые ты добавляешь, сначала попадают сюда — и карточки, которые ты уже знаешь и отложил из актива.")}
         </p>
       ) : (
         <div className="mb-8">
@@ -896,7 +1170,7 @@ function ListView({ deck }) {
           className="flex items-center gap-2"
           style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}
         >
-          <BookOpen size={18} style={{ color: PALETTE.mint }} /> В активной колоде ({active.length})
+          <BookOpen size={18} style={{ color: PALETTE.mint }} /> {t("В активной колоде (N)", active.length)}
         </h3>
         {active.length > 0 && (
           <button
@@ -904,13 +1178,13 @@ function ListView({ deck }) {
             className="text-xs px-3 py-1.5 rounded-full"
             style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            всё в долгий ящик
+            {t("всё в долгий ящик")}
           </button>
         )}
       </div>
       {active.length === 0 ? (
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>
-          Пока ничего не выбрано для повторения.
+          {t("Пока ничего не выбрано для повторения.")}
         </p>
       ) : (
         active.map((item) => <Row key={item.id} item={item} />)
@@ -921,8 +1195,9 @@ function ListView({ deck }) {
 
 // ---- Bulk-add form: one line per card, reused by language decks and by the
 // "add children" / "split" flows in Focus mode ----
-function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долгий ящик" }) {
+function BulkAddForm({ onAdd, onDone, doneLabel }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
   const lineCount = text
@@ -947,23 +1222,23 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
         style={{
           fontFamily: "'IBM Plex Sans', sans-serif",
           color: PALETTE.mustard,
-          background: "rgba(123,63,160,0.1)",
+          background: "rgba(120,132,148,0.12)",
         }}
       >
-        Можно вставить сразу целый список — каждая строка станет отдельной карточкой.
+        {t("Можно вставить сразу целый список — каждая строка станет отдельной карточкой.")}
       </p>
       <p className="text-sm mb-5 mt-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-        Формат одной строки:{" "}
-        <span style={{ color: PALETTE.mustard }}>текст - перевод - транскрипция - заметка</span>.
-        Обязательно только первое поле, остальное — по желанию.
+        {t("Формат одной строки:")}{" "}
+        <span style={{ color: PALETTE.mustard }}>{t("текст - перевод - транскрипция - заметка")}</span>.
+        {" "}{t("Обязательно только первое поле, остальное — по желанию.")}
       </p>
 
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={
+        placeholder={t(
           "How's it going? - Как дела? - хаузит гоуин - неформальное приветствие среди друзей\nresilient - стойкий - ризИльент\nworthwhile\nIt's up to you. - Решать тебе."
-        }
+        )}
         rows={12}
         className="w-full rounded-xl p-4 outline-none resize-none"
         style={{
@@ -979,7 +1254,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
         className="flex items-center justify-between mt-2 mb-4 text-xs"
         style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
       >
-        <span>{lineCount > 0 ? `строк: ${lineCount}` : "вставь одну или несколько строк"}</span>
+        <span>{lineCount > 0 ? t("строк: N", lineCount) : t("вставь одну или несколько строк")}</span>
       </div>
 
       <button
@@ -989,7 +1264,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
         style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
       >
         {saved ? <Check size={18} /> : <Plus size={18} />}
-        {saved ? "Добавлено" : lineCount > 1 ? `Добавить ${lineCount} карточек` : doneLabel}
+        {saved ? t("Добавлено") : lineCount > 1 ? t("Добавить N карточек", lineCount) : doneLabel ?? t("Добавить в долгий ящик")}
       </button>
     </div>
   );
@@ -997,6 +1272,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel = "Добавить в долг�
 
 function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [tab, setTab] = useState("practice");
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(title);
@@ -1004,9 +1280,9 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
   const waitingCount = deck.items.filter((i) => i.status === "waiting").length;
 
   const tabs = [
-    { key: "practice", label: "Повторение" },
-    { key: "list", label: `Долгий ящик${waitingCount ? ` (${waitingCount})` : ""}` },
-    { key: "add", label: "Добавить" },
+    { key: "practice", label: t("Повторение") },
+    { key: "list", label: waitingCount ? t("Долгий ящик (N)", waitingCount) : t("Долгий ящик") },
+    { key: "add", label: t("Добавить") },
   ];
 
   const saveRename = () => {
@@ -1023,7 +1299,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
             className="flex items-center gap-1 text-sm"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
           >
-            <ArrowLeft size={16} /> Home
+            <ArrowLeft size={16} /> {t("Home")}
           </button>
 
           <div className="flex items-center gap-2">
@@ -1044,7 +1320,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
                     setNameDraft(title);
                     setRenaming(true);
                   }}
-                  title="Переименовать колоду"
+                  title={t("Переименовать колоду")}
                   style={{ color: PALETTE.fadeText }}
                 >
                   <Pencil size={15} />
@@ -1074,31 +1350,31 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
               className="px-3 py-2 rounded-xl text-sm"
               style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              Сохранить
+              {t("Сохранить")}
             </button>
             <button
               onClick={() => setRenaming(false)}
               className="px-3 py-2 rounded-xl text-sm"
               style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              Отмена
+              {t("Отмена")}
             </button>
           </div>
         )}
 
         <div className="flex gap-2 mb-2">
-          {tabs.map((t) => (
+          {tabs.map((tabItem) => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               className="flex-1 text-xs py-2 rounded-full"
               style={{
                 fontFamily: "'IBM Plex Sans', sans-serif",
-                background: tab === t.key ? PALETTE.mustard : PALETTE.chip,
-                color: tab === t.key ? PALETTE.bgDeep : PALETTE.fadeText,
+                background: tab === tabItem.key ? PALETTE.mustard : PALETTE.chip,
+                color: tab === tabItem.key ? PALETTE.bgDeep : PALETTE.fadeText,
               }}
             >
-              {t.label}
+              {tabItem.label}
             </button>
           ))}
         </div>
@@ -1115,7 +1391,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
             className="text-xs"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}
           >
-            Удалить колоду «{title}»
+            {t("Удалить колоду «N»", title)}
           </button>
         ) : (
           <div className="flex items-center gap-2">
@@ -1123,21 +1399,21 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
               className="text-xs"
               style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}
             >
-              Удалить колоду «{title}» навсегда, вместе со всеми карточками?
+              {t("Удалить колоду «N» навсегда, вместе со всеми карточками?", title)}
             </span>
             <button
               onClick={() => onDelete(deckId)}
               className="text-xs px-3 py-1.5 rounded-full shrink-0"
               style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              Да
+              {t("Да")}
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
               className="text-xs px-3 py-1.5 rounded-full shrink-0"
               style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              Отмена
+              {t("Отмена")}
             </button>
           </div>
         )}
@@ -1148,6 +1424,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
 
 function CreateTile({ label, placeholder, onCreate, big }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [creating, setCreating] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const formRef = useRef(null);
@@ -1221,7 +1498,7 @@ function CreateTile({ label, placeholder, onCreate, big }) {
           className="flex-1 rounded-xl py-2 text-sm disabled:opacity-40"
           style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Создать
+          {t("Создать")}
         </button>
         <button
           onClick={() => {
@@ -1231,7 +1508,7 @@ function CreateTile({ label, placeholder, onCreate, big }) {
           className="flex-1 rounded-xl py-2 text-sm"
           style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Отмена
+          {t("Отмена")}
         </button>
       </div>
     </div>
@@ -1254,6 +1531,7 @@ function TileName({ children }) {
 
 function LanguageDashboard({ decks, onOpen, onAddDeck }) {
   const PALETTE = useTheme();
+  const t = useT();
   const countActive = (d) => d.items.filter((i) => i.status === "active").length;
   const countWaiting = (d) => d.items.filter((i) => i.status === "waiting").length;
 
@@ -1261,9 +1539,9 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-16">
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
-          Колод пока нет. Создай первую, чтобы начать добавлять карточки.
+          {t("Колод пока нет. Создай первую, чтобы начать добавлять карточки.")}
         </p>
-        <CreateTile label="Создать колоду" placeholder="Название колоды" onCreate={onAddDeck} big />
+        <CreateTile label={t("Создать колоду")} placeholder={t("Название колоды")} onCreate={onAddDeck} big />
       </div>
     );
   }
@@ -1281,7 +1559,7 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
             style={{
               height: "182px",
               background: PALETTE.card,
-              boxShadow: `0 16px 34px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`,
+              boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
               border: `1px solid ${PALETTE.cardEdge}`,
             }}
           >
@@ -1289,7 +1567,7 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
               className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
               style={{
                 background: PALETTE.card,
-                boxShadow: `0 10px 20px rgba(140,155,165,0.32), 0 2px 0 ${PALETTE.cardHighlight} inset`,
+                boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
                 border: `1px solid ${PALETTE.cardEdge}`,
               }}
             >
@@ -1300,15 +1578,15 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
             <span
               style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}
             >
-              {countActive(deck)} активных
+              {t("N активных", countActive(deck))}
             </span>
             <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.7rem", color: PALETTE.waiting }}>
-              {countWaiting(deck)} в долгом ящике
+              {t("N в долгом ящике", countWaiting(deck))}
             </span>
           </button>
         );
       })}
-      <CreateTile label="Новая колода" placeholder="Название колоды" onCreate={onAddDeck} />
+      <CreateTile label={t("Новая колода")} placeholder={t("Название колоды")} onCreate={onAddDeck} />
     </div>
   );
 }
@@ -1435,6 +1713,7 @@ function addAtomsToTree(children, parentId, newAtoms) {
 // Small folder/atom row used while browsing a goal's tree
 function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isCategory = node.type === "category";
   const activeCount = isCategory ? countAtomsByStatus(node, "active") : 0;
@@ -1443,7 +1722,7 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
   return (
     <div
       className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
-      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
     >
       <button onClick={onOpen} className="flex items-center gap-3 min-w-0 flex-1 text-left">
         {isCategory ? (
@@ -1464,7 +1743,7 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
           </p>
           {isCategory ? (
             <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.78rem" }}>
-              {activeCount} активных · {totalCount} всего
+              {t("N активных · N всего", activeCount, totalCount)}
             </p>
           ) : (
             node.ru && (
@@ -1479,21 +1758,21 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
       {confirmDelete ? (
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
-            Удалить?
+            {t("Удалить?")}
           </span>
           <button
             onClick={() => onDelete(node.id)}
             className="text-xs px-2 py-1 rounded-full"
             style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Да
+            {t("Да")}
           </button>
           <button
             onClick={() => setConfirmDelete(false)}
             className="text-xs px-2 py-1 rounded-full"
             style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Отмена
+            {t("Отмена")}
           </button>
         </div>
       ) : (
@@ -1501,20 +1780,20 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
           {!isCategory && (
             <button
               onClick={() => onToggleStatus(node)}
-              title={node.status === "waiting" ? "Перенести в активную колоду" : "Отложить в долгий ящик"}
+              title={node.status === "waiting" ? t("Перенести в активную колоду") : t("Отложить в долгий ящик")}
               className="p-1.5 rounded-full"
               style={{
                 color: node.status === "waiting" ? PALETTE.mint : PALETTE.waiting,
-                background: node.status === "waiting" ? "rgba(217,138,40,0.12)" : "rgba(124,140,153,0.14)",
+                background: node.status === "waiting" ? "rgba(120,132,148,0.16)" : "rgba(124,140,153,0.14)",
               }}
             >
               {node.status === "waiting" ? <ArrowRightCircle size={20} /> : <ArrowLeftCircle size={20} />}
             </button>
           )}
-          <button onClick={() => onSplit(node.id)} title="Разбить на карточки" className="p-1.5 rounded-full" style={{ color: PALETTE.mint }}>
+          <button onClick={() => onSplit(node.id)} title={t("Разбить на карточки")} className="p-1.5 rounded-full" style={{ color: PALETTE.mint }}>
             <FolderPlus size={18} />
           </button>
-          <button onClick={() => setConfirmDelete(true)} title="Удалить" className="p-1.5" style={{ color: "#5B6275" }}>
+          <button onClick={() => setConfirmDelete(true)} title={t("Удалить")} className="p-1.5" style={{ color: "#5B6275" }}>
             <Trash2 size={15} />
           </button>
         </div>
@@ -1527,6 +1806,7 @@ function NodeRow({ node, onOpen, onSplit, onDelete, onToggleStatus }) {
 // the ability to split this atom into a category right from here.
 function AtomView({ atom, onBack, onSave, onSplit }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [flipped, setFlipped] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showTranscription, setShowTranscription] = useTranscription();
@@ -1541,23 +1821,23 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
     <div className="flex flex-col items-center px-6 py-8">
       <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
         <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Назад
+          <ArrowLeft size={16} /> {t("Назад")}
         </button>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setEditing((e) => !e)}
-            title="Редактировать карточку"
+            title={t("Редактировать карточку")}
             className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: editing ? PALETTE.mustard : PALETTE.chip, color: editing ? PALETTE.bgDeep : PALETTE.fadeText }}
           >
-            <Pencil size={14} /> редактировать
+            <Pencil size={14} /> {t("редактировать")}
           </button>
           <button
             onClick={() => setShowTranscription((s) => !s)}
             className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: showTranscription ? PALETTE.mustard : PALETTE.chip, color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText }}
           >
-            <Type size={14} /> транскрипция
+            <Type size={14} /> {t("транскрипция")}
           </button>
         </div>
       </div>
@@ -1572,7 +1852,7 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
             className="flex items-center gap-2 mt-8 text-sm px-4 py-2 rounded-full"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint, background: PALETTE.chip }}
           >
-            <FolderPlus size={16} /> разбить на подкарточки
+            <FolderPlus size={16} /> {t("разбить на подкарточки")}
           </button>
         </>
       )}
@@ -1582,6 +1862,7 @@ function AtomView({ atom, onBack, onSave, onSplit }) {
 
 function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [path, setPath] = useState([]); // array of category node ids from the root
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(goal.name);
@@ -1652,7 +1933,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
           </button>
           <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
         </div>
-        <PracticeView deck={practiceDeck} resetScopeLabel={`цели «${goal.name}»`} deckKey={goal.id} />
+        <PracticeView deck={practiceDeck} resetScopeName={goal.name} deckKey={goal.id} />
       </div>
     );
   }
@@ -1682,10 +1963,10 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
       <div className="min-h-screen" style={{ background: PALETTE.bg }}>
         <div className="max-w-md mx-auto w-full px-6 pt-8">
           <button onClick={() => setAddTarget(undefined)} className="flex items-center gap-1 text-sm mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            <ArrowLeft size={16} /> Отмена
+            <ArrowLeft size={16} /> {t("Отмена")}
           </button>
         </div>
-        <BulkAddForm onAdd={handleAdd} onDone={() => setAddTarget(undefined)} doneLabel="Добавить" />
+        <BulkAddForm onAdd={handleAdd} onDone={() => setAddTarget(undefined)} doneLabel={t("Добавить")} />
       </div>
     );
   }
@@ -1695,7 +1976,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
       <div className="max-w-md mx-auto w-full px-6 pt-8">
         <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            <ArrowLeft size={16} /> Home
+            <ArrowLeft size={16} /> {t("Home")}
           </button>
           <div className="flex items-center gap-2">
             {!renaming && (
@@ -1709,7 +1990,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
                     setNameDraft(goal.name);
                     setRenaming(true);
                   }}
-                  title="Переименовать цель"
+                  title={t("Переименовать цель")}
                   style={{ color: PALETTE.fadeText }}
                 >
                   <Pencil size={15} />
@@ -1730,17 +2011,17 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
               style={{ background: PALETTE.card, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
             />
             <button onClick={saveRename} className="px-3 py-2 rounded-xl text-sm" style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-              Сохранить
+              {t("Сохранить")}
             </button>
             <button onClick={() => setRenaming(false)} className="px-3 py-2 rounded-xl text-sm" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-              Отмена
+              {t("Отмена")}
             </button>
           </div>
         )}
 
         <div className="flex items-center gap-1 mb-3 overflow-x-auto">
           {path.length > 0 && (
-            <button onClick={() => setPath((p) => p.slice(0, -1))} title="Наверх" className="p-1.5 rounded-full mr-1 shrink-0" style={{ background: PALETTE.chip, color: PALETTE.fadeText }}>
+            <button onClick={() => setPath((p) => p.slice(0, -1))} title={t("Наверх")} className="p-1.5 rounded-full mr-1 shrink-0" style={{ background: PALETTE.chip, color: PALETTE.fadeText }}>
               <ArrowUp size={14} />
             </button>
           )}
@@ -1768,14 +2049,14 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4 disabled:opacity-40"
           style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Повторение ({allAtoms.filter((a) => a.status === "active").length} активных во всей цели)
+          {t("Повторение (N активных во всей цели)", allAtoms.filter((a) => a.status === "active").length)}
         </button>
       </div>
 
       <div className="px-6 max-w-md mx-auto w-full pb-4">
         {currentChildren.length === 0 ? (
           <p className="text-sm mb-4" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            Здесь пока пусто. Добавь карточки — каждую потом можно «разбить» на подкатегории.
+            {t("Здесь пока пусто. Добавь карточки — каждую потом можно «разбить» на подкатегории.")}
           </p>
         ) : (
           currentChildren.map((node) => (
@@ -1795,25 +2076,25 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
           className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2"
           style={{ background: PALETTE.chip, color: PALETTE.mint, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          <Plus size={18} /> Добавить карточки сюда
+          <Plus size={18} /> {t("Добавить карточки сюда")}
         </button>
       </div>
 
       <div className="max-w-md mx-auto w-full px-6 pb-10 pt-4">
         {!confirmDeleteGoal ? (
           <button onClick={() => setConfirmDeleteGoal(true)} className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}>
-            Удалить цель «{goal.name}»
+            {t("Удалить цель «N»", goal.name)}
           </button>
         ) : (
           <div className="flex items-center gap-2">
             <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
-              Удалить цель «{goal.name}» навсегда, вместе со всем деревом?
+              {t("Удалить цель «N» навсегда, вместе со всем деревом?", goal.name)}
             </span>
             <button onClick={() => onDelete(goal.id)} className="text-xs px-3 py-1.5 rounded-full shrink-0" style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-              Да
+              {t("Да")}
             </button>
             <button onClick={() => setConfirmDeleteGoal(false)} className="text-xs px-3 py-1.5 rounded-full shrink-0" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-              Отмена
+              {t("Отмена")}
             </button>
           </div>
         )}
@@ -1824,6 +2105,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
 
 function FocusDashboard({ goals, onOpen, onAddGoal }) {
   const PALETTE = useTheme();
+  const t = useT();
   const countActive = (g) => g.children.flatMap(collectAtoms).filter((a) => a.status === "active").length;
   const countTotal = (g) => g.children.flatMap(collectAtoms).length;
 
@@ -1831,9 +2113,9 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-16">
         <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
-          Целей пока нет. Создай первую — язык, молитвы, личный бренд, любой проект.
+          {t("Целей пока нет. Создай первую — язык, молитвы, личный бренд, любой проект.")}
         </p>
-        <CreateTile label="Создать цель" placeholder="Название цели" onCreate={onAddGoal} big />
+        <CreateTile label={t("Создать цель")} placeholder={t("Название цели")} onCreate={onAddGoal} big />
       </div>
     );
   }
@@ -1845,25 +2127,25 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
           key={goal.id}
           onClick={() => onOpen(goal.id)}
           className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
-          style={{ height: "182px", background: PALETTE.card, boxShadow: `0 16px 34px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
+          style={{ height: "182px", background: PALETTE.card, boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
         >
           <span
             className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
-            style={{ background: PALETTE.card, boxShadow: `0 10px 20px rgba(140,155,165,0.32), 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
+            style={{ background: PALETTE.card, boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
           >
             <Target size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
           </span>
           <TileName>{goal.name}</TileName>
           <div className="flex-1" />
           <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.mintDeep }}>
-            {countActive(goal)} активных
+            {t("N активных", countActive(goal))}
           </span>
           <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.7rem", color: PALETTE.waiting }}>
-            {countTotal(goal)} карточек всего
+            {t("N карточек всего", countTotal(goal))}
           </span>
         </button>
       ))}
-      <CreateTile label="Новая цель" placeholder="Название цели" onCreate={onAddGoal} />
+      <CreateTile label={t("Новая цель")} placeholder={t("Название цели")} onCreate={onAddGoal} />
     </div>
   );
 }
@@ -1929,12 +2211,23 @@ function useTextDocs(storageKey) {
     },
     [texts, persist]
   );
+  // Removes every id in one persist() call — calling deleteText in a loop
+  // would have each call read the same stale `texts` closure and only the
+  // last one would stick, silently losing the rest of the batch.
+  const deleteTexts = useCallback(
+    (ids) => {
+      const idSet = new Set(ids);
+      persist(texts.filter((t) => !idSet.has(t.id)));
+    },
+    [texts, persist]
+  );
 
-  return { texts, addText, updateText, deleteText };
+  return { texts, addText, updateText, deleteText, deleteTexts };
 }
 
-function TextForm({ initial, onSave, onCancel, titlePlaceholder = "Название текста", bodyPlaceholder = "Вставь текст целиком — разбивка на страницы произойдёт автоматически" }) {
+function TextForm({ initial, onSave, onCancel, titlePlaceholder, bodyPlaceholder }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [title, setTitle] = useState(initial?.title || "");
   const [body, setBody] = useState(initial?.body || "");
 
@@ -1952,14 +2245,14 @@ function TextForm({ initial, onSave, onCancel, titlePlaceholder = "Назван�
         autoFocus
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder={titlePlaceholder}
+        placeholder={titlePlaceholder ?? t("Название текста")}
         className="rounded-xl px-3 py-2 outline-none"
         style={fieldStyle}
       />
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder={bodyPlaceholder}
+        placeholder={bodyPlaceholder ?? t("Вставь текст целиком — разбивка на страницы произойдёт автоматически")}
         rows={14}
         className="rounded-xl p-4 outline-none resize-none"
         style={fieldStyle}
@@ -1971,14 +2264,14 @@ function TextForm({ initial, onSave, onCancel, titlePlaceholder = "Назван�
           className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
           style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Сохранить
+          {t("Сохранить")}
         </button>
         <button
           onClick={onCancel}
           className="flex-1 rounded-full py-2.5 text-sm"
           style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Отмена
+          {t("Отмена")}
         </button>
       </div>
     </div>
@@ -2055,6 +2348,7 @@ function paginateIntoElement(body, measureEl, maxHeight) {
 
 function PagesReader({ text, onBack, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
+  const t = useT();
   const wrapRef = useRef(null);
   const measureRef = useRef(null);
   const [pages, setPages] = useState(null);
@@ -2096,7 +2390,7 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
         <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Home
+          <ArrowLeft size={16} /> {t("Home")}
         </button>
         <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
           {text.title}
@@ -2108,12 +2402,12 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
         <div
           ref={wrapRef}
           className="flex-1 min-h-0 rounded-2xl p-6 overflow-hidden"
-          style={{ background: PALETTE.card, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 16px 32px rgba(140,155,165,0.22)" }}
+          style={{ background: PALETTE.card, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}` }}
         >
           {pages ? (
             <div style={readingStyle} dangerouslySetInnerHTML={{ __html: pages[idx] }} />
           ) : (
-            <p style={{ ...readingStyle, color: PALETTE.fadeText }}>Разбиваю на страницы…</p>
+            <p style={{ ...readingStyle, color: PALETTE.fadeText }}>{t("Разбиваю на страницы…")}</p>
           )}
         </div>
 
@@ -2122,8 +2416,8 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.max(0, p - 1))}
             disabled={idx === 0}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
-            aria-label="Предыдущая страница"
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+            aria-label={t("Предыдущая страница")}
           >
             <ChevronLeft size={24} strokeWidth={2.5} />
           </button>
@@ -2134,8 +2428,8 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
             onClick={() => setIdx((p) => Math.min((pages?.length || 1) - 1, p + 1))}
             disabled={!pages || idx >= pages.length - 1}
             className="rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
-            aria-label="Следующая страница"
+            style={{ width: "48px", height: "48px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+            aria-label={t("Следующая страница")}
           >
             <ChevronRight size={24} strokeWidth={2.5} />
           </button>
@@ -2189,7 +2483,7 @@ function WordCardRow({ card, onOpen, emphasizeMeaning }) {
     <button
       onClick={onOpen}
       className="flex items-start justify-between gap-3 px-4 py-3 rounded-2xl mb-2 w-full text-left"
-      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
     >
       <div className="min-w-0 flex-1 overflow-y-auto" style={{ maxHeight: "9.5rem" }}>
         {meaningFirst ? (
@@ -2282,6 +2576,7 @@ function WordTree({ tabs, tabIndex, onSelectTab, parentCard, onSelectParent, ope
 
 function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [flipped, setFlipped] = useState(false);
   const [showTranscription, setShowTranscription] = useTranscription();
 
@@ -2295,7 +2590,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
     <div className="flex flex-col items-center px-6 py-8">
       <div className="w-full max-w-md flex items-center justify-between mb-6 gap-2">
         <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Назад
+          <ArrowLeft size={16} /> {t("Назад")}
         </button>
         {canStep && (
           <span className="text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}>
@@ -2307,7 +2602,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full shrink-0"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: showTranscription ? PALETTE.mustard : PALETTE.chip, color: showTranscription ? PALETTE.bgDeep : PALETTE.fadeText }}
         >
-          <Type size={14} /> транскрипция
+          <Type size={14} /> {t("транскрипция")}
         </button>
       </div>
       <IndexCard item={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={-1.5} showTranscription={showTranscription} onSwipeUp={undefined} />
@@ -2317,16 +2612,16 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
           <button
             onClick={onPrev}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
-            aria-label="Предыдущая"
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+            aria-label={t("Предыдущая")}
           >
             <ChevronLeft size={28} strokeWidth={2.5} />
           </button>
           <button
             onClick={onNext}
             className="rounded-full flex items-center justify-center"
-            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: "0 8px 18px rgba(123,63,160,0.35)" }}
-            aria-label="Следующая"
+            style={{ width: "56px", height: "56px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+            aria-label={t("Следующая")}
           >
             <ChevronRight size={28} strokeWidth={2.5} />
           </button>
@@ -2338,6 +2633,7 @@ function WordCardView({ card, onBack, onPrev, onNext, position, total }) {
 
 function WordView({ text, onBack, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
+  const t = useT();
   const tabs = useMemo(() => parseWordDocument(text.body), [text.body]);
   const [tabIndex, setTabIndex] = useState(0);
   const [openParentId, setOpenParentId] = useState(null);
@@ -2372,7 +2668,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
   const header = (
     <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
       <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-        <ArrowLeft size={16} /> Home
+        <ArrowLeft size={16} /> {t("Home")}
       </button>
       <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
         {text.title}
@@ -2414,7 +2710,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
       <div className="min-h-screen" style={{ background: PALETTE.bg }}>
         {header}
         <p className="px-6 pt-8 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          В этом тексте не найдено ни одного заголовка «##».
+          {t("В этом тексте не найдено ни одного заголовка «##».")}
         </p>
       </div>
     );
@@ -2431,7 +2727,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
           ))
         ) : activeTab.cards.length === 0 ? (
           <p className="text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            В этом разделе пока нет карточек.
+            {t("В этом разделе пока нет карточек.")}
           </p>
         ) : (
           activeTab.cards.map((card) => (
@@ -2456,6 +2752,7 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
 // own screen, no dashboard tagline/mode-switch chrome above it.
 function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlaceholder }) {
   const PALETTE = useTheme();
+  const t = useT();
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8">
@@ -2464,7 +2761,7 @@ function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlac
           className="flex items-center gap-1 text-sm"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
         >
-          <ArrowLeft size={16} /> Отмена
+          <ArrowLeft size={16} /> {t("Отмена")}
         </button>
       </div>
       <TextForm initial={initial} onCancel={onCancel} onSave={onSave} titlePlaceholder={titlePlaceholder} bodyPlaceholder={bodyPlaceholder} />
@@ -2475,16 +2772,19 @@ function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlac
 // A flat list of {id, title, body} documents with create/edit/delete — backs
 // both the Pages dashboard and the Слово dashboard, which only differ in
 // copy and icon.
-function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText = "Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.", createLabel = "Добавить текст", rowIcon: RowIcon = BookOpen }) {
+function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, createLabel, rowIcon: RowIcon = BookOpen }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const resolvedEmptyText = emptyText ?? t("Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.");
+  const resolvedCreateLabel = createLabel ?? t("Добавить текст");
 
   return (
     <div className="w-full max-w-md px-6 pt-8">
       {texts.length === 0 ? (
         <div className="flex flex-col items-center gap-6 py-10">
           <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
-            {emptyText}
+            {resolvedEmptyText}
           </p>
           <button
             onClick={onCreate}
@@ -2494,55 +2794,55 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText = "Т�
             <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
               <Plus size={24} style={{ color: PALETTE.mustard }} />
             </span>
-            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>{createLabel}</span>
+            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>{resolvedCreateLabel}</span>
           </button>
         </div>
       ) : (
         <>
-          {texts.map((t) => (
+          {texts.map((doc) => (
             <div
-              key={t.id}
+              key={doc.id}
               className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
-              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
             >
-              <button onClick={() => onOpen(t.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+              <button onClick={() => onOpen(doc.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
                 <RowIcon size={18} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
                 <div className="min-w-0">
                   <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
-                    {t.title}
+                    {doc.title}
                   </p>
                   <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
-                    {t.body.slice(0, 60)}
+                    {doc.body.slice(0, 60)}
                   </p>
                 </div>
               </button>
 
-              {confirmDeleteId === t.id ? (
+              {confirmDeleteId === doc.id ? (
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => {
-                      onDelete(t.id);
+                      onDelete(doc.id);
                       setConfirmDeleteId(null);
                     }}
                     className="text-xs px-2 py-1 rounded-full"
                     style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    Да
+                    {t("Да")}
                   </button>
                   <button
                     onClick={() => setConfirmDeleteId(null)}
                     className="text-xs px-2 py-1 rounded-full"
                     style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    Отмена
+                    {t("Отмена")}
                   </button>
                 </div>
               ) : (
                 <div className="flex items-center shrink-0 gap-1">
-                  <button onClick={() => onEdit(t.id)} title="Редактировать" className="p-1.5" style={{ color: PALETTE.fadeText }}>
+                  <button onClick={() => onEdit(doc.id)} title={t("Редактировать")} className="p-1.5" style={{ color: PALETTE.fadeText }}>
                     <Pencil size={15} />
                   </button>
-                  <button onClick={() => setConfirmDeleteId(t.id)} title="Удалить" className="p-1.5" style={{ color: "#5B6275" }}>
+                  <button onClick={() => setConfirmDeleteId(doc.id)} title={t("Удалить")} className="p-1.5" style={{ color: "#5B6275" }}>
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -2554,7 +2854,7 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText = "Т�
             className="w-full flex items-center justify-center gap-2 py-3 rounded-full font-medium mt-2 mb-10"
             style={{ background: PALETTE.chip, color: PALETTE.mint, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            <Plus size={18} /> {createLabel}
+            <Plus size={18} /> {resolvedCreateLabel}
           </button>
         </>
       )}
@@ -2626,6 +2926,7 @@ function useVocabulary() {
 // selection it's meant to capture.
 function SelectionCapture({ onAdd }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [sel, setSel] = useState(null);
 
   useEffect(() => {
@@ -2711,10 +3012,10 @@ function SelectionCapture({ onAdd }) {
         background: PALETTE.mustard,
         color: PALETTE.bgDeep,
         fontFamily: "'IBM Plex Sans', sans-serif",
-        boxShadow: "0 8px 18px rgba(123,63,160,0.4)",
+        boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
       }}
     >
-      <Highlighter size={14} /> Добавить в Vocabulary
+      <Highlighter size={14} /> {t("Добавить в Vocabulary")}
     </button>
   );
 }
@@ -2724,6 +3025,7 @@ function SelectionCapture({ onAdd }) {
 // a copy-everything action (the primary use case), and a guarded clear-all.
 function VocabularyList({ entries, onDelete, onClearAll }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -2742,7 +3044,7 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
     <div className="w-full max-w-md px-6 pt-8 pb-10">
       {entries.length === 0 ? (
         <p className="text-sm text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          Пока пусто — выдели любой текст в приложении и нажми «Добавить в Vocabulary».
+          {t("Пока пусто — выдели любой текст в приложении и нажми «Добавить в Vocabulary».")}
         </p>
       ) : (
         <>
@@ -2751,14 +3053,14 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4"
             style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать всё (${entries.length})`}
+            {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? t("Скопировано") : t("Скопировать всё (N)", entries.length)}
           </button>
 
           {entries.map((entry) => (
             <div
               key={entry.id}
               className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
-              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+              style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
             >
               <p
                 className="min-w-0 flex-1"
@@ -2776,18 +3078,18 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
                     className="text-xs px-2 py-1 rounded-full"
                     style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    Да
+                    {t("Да")}
                   </button>
                   <button
                     onClick={() => setConfirmDeleteId(null)}
                     className="text-xs px-2 py-1 rounded-full"
                     style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    Отмена
+                    {t("Отмена")}
                   </button>
                 </div>
               ) : (
-                <button onClick={() => setConfirmDeleteId(entry.id)} title="Удалить" className="p-1.5 shrink-0" style={{ color: "#5B6275" }}>
+                <button onClick={() => setConfirmDeleteId(entry.id)} title={t("Удалить")} className="p-1.5 shrink-0" style={{ color: "#5B6275" }}>
                   <Trash2 size={15} />
                 </button>
               )}
@@ -2798,7 +3100,7 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
             {confirmClear ? (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
-                  Удалить весь список ({entries.length}) безвозвратно?
+                  {t("Удалить весь список (N) безвозвратно?", entries.length)}
                 </span>
                 <button
                   onClick={() => {
@@ -2808,19 +3110,19 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
                   className="text-xs px-3 py-1.5 rounded-full shrink-0"
                   style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
                 >
-                  Да
+                  {t("Да")}
                 </button>
                 <button
                   onClick={() => setConfirmClear(false)}
                   className="text-xs px-3 py-1.5 rounded-full shrink-0"
                   style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
                 >
-                  Отмена
+                  {t("Отмена")}
                 </button>
               </div>
             ) : (
               <button onClick={() => setConfirmClear(true)} className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}>
-                Очистить весь список
+                {t("Очистить весь список")}
               </button>
             )}
           </div>
@@ -2861,12 +3163,13 @@ function deriveSpecTitle(body, existingTitles) {
 // appears.
 function SpecViewScreen({ spec, onBack }) {
   const PALETTE = useTheme();
+  const t = useT();
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center shrink-0">
         <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Назад
+          <ArrowLeft size={16} /> {t("Назад")}
         </button>
       </div>
       <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10 flex-1 min-h-0 flex flex-col">
@@ -2889,21 +3192,25 @@ function SpecViewScreen({ spec, onBack }) {
 }
 
 // The Specs dashboard: a flat list with per-row checkboxes for multi-select,
-// a "Выделить всё"/"Снять выделение" toggle, "Скопировать выбранное" once
-// something's picked (joining the chosen entries' full text with a clear
-// "---" separator), per-row delete, and a full-width "+" card — matching
-// the Pages-style row cards — that flips in place to "Сохранить"/"Отмена"
-// on tap, reading the new entry straight from the clipboard rather than
-// showing a text field at all.
-function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
+// a "Выделить всё"/"Снять выделение" toggle, "Копировать"/"Удалить выбранное"
+// once something's picked (joining the chosen entries' full text with a
+// clear "---" separator for copy; a 1-step Да/Отмена confirm for delete),
+// and a full-width "+" card — matching the Pages-style row cards — that
+// flips in place to "Сохранить"/"Отмена" on tap, reading the new entry
+// straight from the clipboard rather than showing a text field at all.
+// Deletion is selection-only now — no per-row trash icon — since bulk
+// delete through the checkbox/panel covers the single-record case too.
+function SpecsList({ specs, onOpen, onDeleteSelected, onSaveNew }) {
   const PALETTE = useTheme();
+  const t = useT();
   const [selected, setSelected] = useState(() => new Set());
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [pasteError, setPasteError] = useState(false);
 
   const toggleSelect = (id) => {
+    setConfirmBulkDelete(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -2914,6 +3221,7 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
 
   const allSelected = specs.length > 0 && specs.every((s) => selected.has(s.id));
   const toggleSelectAll = () => {
+    setConfirmBulkDelete(false);
     setSelected(allSelected ? new Set() : new Set(specs.map((s) => s.id)));
   };
 
@@ -2927,6 +3235,12 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
     } catch (e) {
       console.error("Clipboard error", e);
     }
+  };
+
+  const handleDeleteSelected = () => {
+    onDeleteSelected([...selected]);
+    setSelected(new Set());
+    setConfirmBulkDelete(false);
   };
 
   const handleSaveFromClipboard = async () => {
@@ -2953,35 +3267,73 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
     <div className="w-full max-w-md px-6 pt-8 pb-10">
       {specs.length > 0 && (
         <div className="flex items-center gap-2 mb-4">
-          <button
-            onClick={toggleSelectAll}
-            className="text-xs px-3 py-1.5 rounded-full shrink-0"
-            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
-          >
-            {allSelected ? "Снять выделение" : "Выделить всё"}
-          </button>
-          {selected.size > 0 && (
-            <button
-              onClick={handleCopySelected}
-              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-full text-xs whitespace-nowrap"
-              style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
-            >
-              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Скопировано" : `Копировать (${selected.size})`}
-            </button>
+          {confirmBulkDelete ? (
+            <>
+              <span
+                className="flex-1 text-xs px-3 py-1.5"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}
+              >
+                {t("Удалить N записей?", selected.size)}
+              </span>
+              <button
+                onClick={handleDeleteSelected}
+                className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Да")}
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Отмена")}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={toggleSelectAll}
+                className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {allSelected ? t("Снять выделение") : t("Выделить всё")}
+              </button>
+              {selected.size > 0 && (
+                <>
+                  <button
+                    onClick={handleCopySelected}
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-full text-xs whitespace-nowrap"
+                    style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? t("Скопировано") : t("Копировать (N)", selected.size)}
+                  </button>
+                  <button
+                    onClick={() => setConfirmBulkDelete(true)}
+                    title={t("Удалить выбранное")}
+                    aria-label={t("Удалить выбранное")}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-full text-xs shrink-0"
+                    style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </>
+              )}
+            </>
           )}
         </div>
       )}
 
       {specs.length === 0 ? (
         <p className="text-sm text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          Пока пусто — нажми «+», чтобы быстро набросать первую спецификацию.
+          {t("Пока пусто — нажми «+», чтобы быстро набросать первую спецификацию.")}
         </p>
       ) : (
         specs.map((s) => (
           <div
             key={s.id}
             className="flex items-center gap-3 px-4 py-3 rounded-2xl mb-2"
-            style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+            style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
           >
             <button
               onClick={() => toggleSelect(s.id)}
@@ -2990,7 +3342,7 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
                 border: `2px solid ${selected.has(s.id) ? PALETTE.mustard : PALETTE.cardEdge}`,
                 background: selected.has(s.id) ? PALETTE.mustard : "transparent",
               }}
-              aria-label="Выбрать"
+              aria-label={t("Выбрать")}
             >
               {selected.has(s.id) && <Check size={13} style={{ color: PALETTE.bgDeep }} strokeWidth={3} />}
             </button>
@@ -3003,32 +3355,6 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
                 {s.body.slice(0, 60)}
               </p>
             </button>
-
-            {confirmDeleteId === s.id ? (
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => {
-                    onDelete(s.id);
-                    setConfirmDeleteId(null);
-                  }}
-                  className="text-xs px-2 py-1 rounded-full"
-                  style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
-                >
-                  Да
-                </button>
-                <button
-                  onClick={() => setConfirmDeleteId(null)}
-                  className="text-xs px-2 py-1 rounded-full"
-                  style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
-                >
-                  Отмена
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmDeleteId(s.id)} title="Удалить" className="p-1.5 shrink-0" style={{ color: "#5B6275" }}>
-                <Trash2 size={15} />
-              </button>
-            )}
           </div>
         ))
       )}
@@ -3036,7 +3362,7 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
       {confirming ? (
         <div
           className="w-full rounded-2xl px-3 py-3"
-          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
         >
           <div className="flex items-center gap-2">
             <button
@@ -3044,19 +3370,19 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
               style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              <Check size={16} /> Сохранить
+              <Check size={16} /> {t("Сохранить")}
             </button>
             <button
               onClick={handleCancelCreate}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
               style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              <X size={16} /> Отмена
+              <X size={16} /> {t("Отмена")}
             </button>
           </div>
           {pasteError && (
             <p className="text-xs text-center mt-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
-              Скопируй текст перед вставкой
+              {t("Скопируй текст перед вставкой")}
             </p>
           )}
         </div>
@@ -3064,8 +3390,8 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
         <button
           onClick={() => setConfirming(true)}
           className="w-full flex items-center justify-center py-3 rounded-2xl"
-          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
-          aria-label="Новая спецификация"
+          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
+          aria-label={t("Новая спецификация")}
         >
           <Plus size={22} style={{ color: PALETTE.mustard }} />
         </button>
@@ -3080,13 +3406,14 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
 
 function ModeSwitch({ mode, onChange }) {
   const PALETTE = useTheme();
+  const t = useT();
   const options = [
-    { key: "language", label: "Изучение языка", Icon: Languages },
-    { key: "focus", label: "Мои цели", Icon: Target },
+    { key: "language", label: t("Изучение языка"), Icon: Languages },
+    { key: "focus", label: t("Мои цели"), Icon: Target },
     { key: "pages", label: "Pages", Icon: BookOpen },
-    { key: "words", label: "Слово", Icon: BookMarked },
+    { key: "words", label: t("Слово"), Icon: BookMarked },
     { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
-    { key: "specs", label: "Спецификации", Icon: NotebookPen },
+    { key: "specs", label: t("Спецификации"), Icon: NotebookPen },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -3114,7 +3441,7 @@ export default function App() {
   const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
-  const { texts: specs, addText: addSpec, deleteText: deleteSpec } = useTextDocs("specs-v1");
+  const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -3127,6 +3454,8 @@ export default function App() {
   const [openSpecId, setOpenSpecId] = useState(null);
   const [isDark, setIsDark] = useState(false);
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
+  const [reversed, setReversedRaw] = useState(false);
+  const [lang, setLangRaw] = useState("ru");
 
   useEffect(() => {
     let cancelled = false;
@@ -3143,6 +3472,14 @@ export default function App() {
         const res = await window.storage.get("transcription-v1", false);
         if (!cancelled && res && (res.value === "on" || res.value === "off")) setShowTranscriptionRaw(res.value === "on");
       } catch (e) {}
+      try {
+        const res = await window.storage.get("reverse-v1", false);
+        if (!cancelled && res && (res.value === "on" || res.value === "off")) setReversedRaw(res.value === "on");
+      } catch (e) {}
+      try {
+        const res = await window.storage.get("language-v1", false);
+        if (!cancelled && res && (res.value === "ru" || res.value === "en")) setLangRaw(res.value);
+      } catch (e) {}
     })();
     return () => {
       cancelled = true;
@@ -3156,6 +3493,26 @@ export default function App() {
       return value;
     });
   }, []);
+
+  const setReversed = useCallback((next) => {
+    setReversedRaw((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      window.storage.set("reverse-v1", value ? "on" : "off", false).catch(() => {});
+      return value;
+    });
+  }, []);
+
+  const toggleLanguage = useCallback(() => {
+    setLangRaw((prev) => {
+      const next = prev === "ru" ? "en" : "ru";
+      window.storage.set("language-v1", next, false).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  // App() provides LanguageContext but can't consume its own Provider, so
+  // it builds `t` straight from local `lang` state instead of useT().
+  const t = useCallback((key, ...args) => translate(lang, key, ...args), [lang]);
 
   const theme = isDark ? DARK_PALETTE : LIGHT_PALETTE;
 
@@ -3189,6 +3546,8 @@ export default function App() {
   return (
     <ThemeContext.Provider value={theme}>
     <TranscriptionContext.Provider value={[showTranscription, setShowTranscription]}>
+    <ReversedContext.Provider value={[reversed, setReversed]}>
+    <LanguageContext.Provider value={[lang, toggleLanguage]}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
         <SelectionCapture onAdd={vocab.addEntry} />
@@ -3214,8 +3573,10 @@ export default function App() {
         ) : mode === "words" && (wordCreating || editingWord) ? (
           <PagesFormScreen
             initial={editingWord}
-            titlePlaceholder="Название слова"
-            bodyPlaceholder={"Разметка: «## Заголовок» — новая вкладка; обычная строка — карточка (english - перевод - транскрипция - контекст); строка с «>» — пример-потомок предыдущей карточки"}
+            titlePlaceholder={t("Название слова")}
+            bodyPlaceholder={t(
+              "Разметка: «## Заголовок» — новая вкладка; обычная строка — карточка (english - перевод - транскрипция - контекст); строка с «>» — пример-потомок предыдущей карточки"
+            )}
             onCancel={() => {
               setWordCreating(false);
               setWordEditingId(null);
@@ -3260,24 +3621,25 @@ export default function App() {
           <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
             <div className="text-center mb-2">
               <p className="text-sm mb-2 tracking-widest uppercase" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: theme.mint }}>
-                Small pieces. Big change.
+                {t("Small pieces. Big change.")}
               </p>
               <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: theme.cream, fontSize: "2.4rem" }}>
                 {mode === "language"
-                  ? "Твои колоды"
+                  ? t("Твои колоды")
                   : mode === "focus"
-                  ? "Твои цели"
+                  ? t("Твои цели")
                   : mode === "words"
-                  ? "Твои слова"
+                  ? t("Твои слова")
                   : mode === "vocabulary"
                   ? "Vocabulary"
                   : mode === "specs"
-                  ? "Спецификации"
-                  : "Твои тексты"}
+                  ? t("Спецификации")
+                  : t("Твои тексты")}
               </h1>
             </div>
 
-            <div className="w-full flex justify-end max-w-lg">
+            <div className="w-full flex justify-end max-w-lg gap-2">
+              <LanguageToggle lang={lang} onToggle={toggleLanguage} />
               <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
             </div>
 
@@ -3294,8 +3656,8 @@ export default function App() {
                 onCreate={() => setWordCreating(true)}
                 onEdit={setWordEditingId}
                 onDelete={deleteWord}
-                emptyText="Слов пока нет. Добавь первое — с разметкой «## / > »."
-                createLabel="Новое слово"
+                emptyText={t("Слов пока нет. Добавь первое — с разметкой «## / > ».")}
+                createLabel={t("Новое слово")}
                 rowIcon={BookMarked}
               />
             ) : mode === "vocabulary" ? (
@@ -3304,7 +3666,7 @@ export default function App() {
               <SpecsList
                 specs={specs}
                 onOpen={setOpenSpecId}
-                onDelete={deleteSpec}
+                onDeleteSelected={deleteSpecs}
                 onSaveNew={(body) => addSpec(deriveSpecTitle(body, specs.map((s) => s.title)), body)}
               />
             ) : (
@@ -3319,6 +3681,8 @@ export default function App() {
           </div>
         )}
       </div>
+    </LanguageContext.Provider>
+    </ReversedContext.Provider>
     </TranscriptionContext.Provider>
     </ThemeContext.Provider>
   );
