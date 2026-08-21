@@ -28,6 +28,7 @@ import {
   ChevronDown,
   Highlighter,
   Copy,
+  NotebookPen,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -2796,7 +2797,253 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// App shell — theme, mode switch, routing between the five modes
+// SPECS — a fast scratch notebook: no title screen, no confirmations, just
+// tap "+" and start typing. The first line of the body becomes the title
+// automatically; a numbered fallback covers a blank/titleless entry.
+// ════════════════════════════════════════════════════════════════════════
+
+function deriveSpecTitle(body, existingTitles) {
+  const firstLine = (body || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (firstLine) {
+    return firstLine.length > 60 ? `${firstLine.slice(0, 60).trimEnd()}…` : firstLine;
+  }
+  let maxN = 0;
+  for (const t of existingTitles) {
+    const m = /^Спецификация №(\d+)$/.exec(t);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  return `Спецификация №${maxN + 1}`;
+}
+
+// Tap 1 (the dashboard's "+") lands here: a full-screen textarea, already
+// focused, keyboard already up — no intermediate "enter a title" screen.
+// The same "+" button is rendered again here, in the same fixed position,
+// now showing a checkmark and pulsing gently so the eye stays on it — tap 2
+// saves immediately, no confirmation step.
+function SpecCreateScreen({ onCancel, onSave }) {
+  const PALETTE = useTheme();
+  const [body, setBody] = useState("");
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 shrink-0">
+        <button onClick={onCancel} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Отмена
+        </button>
+      </div>
+      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-24 flex-1 min-h-0 flex flex-col">
+        <textarea
+          ref={textareaRef}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Начни печатать — заголовок появится сам, из первой строки…"
+          className="flex-1 w-full rounded-xl p-4 outline-none resize-none"
+          style={{
+            background: PALETTE.card,
+            color: PALETTE.ink,
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            fontSize: "0.95rem",
+            border: `1px solid ${PALETTE.cardEdge}`,
+          }}
+        />
+      </div>
+      <button
+        onClick={() => onSave(body)}
+        className="fixed rounded-full flex items-center justify-center animate-pulse"
+        style={{
+          width: "60px",
+          height: "60px",
+          right: "24px",
+          bottom: "24px",
+          background: PALETTE.mustard,
+          color: PALETTE.bgDeep,
+          boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
+          zIndex: 50,
+        }}
+        aria-label="Сохранить"
+      >
+        <Check size={26} />
+      </button>
+    </div>
+  );
+}
+
+// Opening an existing entry uses the app's standard edit pattern instead —
+// explicit Save/Cancel, no FAB — since the two-tap speed path above is
+// specifically about capturing something new as fast as possible.
+function SpecEditScreen({ spec, onCancel, onSave }) {
+  const PALETTE = useTheme();
+  const [body, setBody] = useState(spec.body);
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
+        <button onClick={onCancel} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Отмена
+        </button>
+        <button
+          onClick={() => onSave(body)}
+          disabled={!body.trim()}
+          className="px-4 py-2 rounded-full text-sm font-medium disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Сохранить
+        </button>
+      </div>
+      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10 flex-1 min-h-0 flex flex-col">
+        <textarea
+          autoFocus
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          className="flex-1 w-full rounded-xl p-4 outline-none resize-none"
+          style={{
+            background: PALETTE.card,
+            color: PALETTE.ink,
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            fontSize: "0.95rem",
+            border: `1px solid ${PALETTE.cardEdge}`,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// The Specs dashboard: a flat list with per-row checkboxes for multi-select
+// ("Скопировать выбранное" appears once something's picked, joining the
+// chosen entries' full text with a clear "---" separator), per-row delete,
+// and the fixed "+" FAB that kicks off the two-tap create flow above.
+function SpecsList({ specs, onOpen, onDelete, onCreate }) {
+  const PALETTE = useTheme();
+  const [selected, setSelected] = useState(() => new Set());
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleCopySelected = async () => {
+    const chosen = specs.filter((s) => selected.has(s.id));
+    const text = chosen.map((s) => `${s.title}\n\n${s.body}`).join("\n\n---\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("Clipboard error", e);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-md px-6 pt-8 pb-28">
+      {selected.size > 0 && (
+        <button
+          onClick={handleCopySelected}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4"
+          style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать выбранное (${selected.size})`}
+        </button>
+      )}
+
+      {specs.length === 0 ? (
+        <p className="text-sm text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          Пока пусто — нажми «+», чтобы быстро набросать первую спецификацию.
+        </p>
+      ) : (
+        specs.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center gap-3 px-4 py-3 rounded-2xl mb-2"
+            style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+          >
+            <button
+              onClick={() => toggleSelect(s.id)}
+              className="shrink-0 w-5 h-5 rounded-md flex items-center justify-center"
+              style={{
+                border: `2px solid ${selected.has(s.id) ? PALETTE.mustard : PALETTE.cardEdge}`,
+                background: selected.has(s.id) ? PALETTE.mustard : "transparent",
+              }}
+              aria-label="Выбрать"
+            >
+              {selected.has(s.id) && <Check size={13} style={{ color: PALETTE.bgDeep }} strokeWidth={3} />}
+            </button>
+
+            <button onClick={() => onOpen(s.id)} className="flex-1 min-w-0 text-left">
+              <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+                {s.title}
+              </p>
+              <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
+                {s.body.slice(0, 60)}
+              </p>
+            </button>
+
+            {confirmDeleteId === s.id ? (
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    onDelete(s.id);
+                    setConfirmDeleteId(null);
+                  }}
+                  className="text-xs px-2 py-1 rounded-full"
+                  style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+                >
+                  Да
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteId(null)}
+                  className="text-xs px-2 py-1 rounded-full"
+                  style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+                >
+                  Отмена
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDeleteId(s.id)} title="Удалить" className="p-1.5 shrink-0" style={{ color: "#5B6275" }}>
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        ))
+      )}
+
+      <button
+        onClick={onCreate}
+        className="fixed rounded-full flex items-center justify-center"
+        style={{
+          width: "60px",
+          height: "60px",
+          right: "24px",
+          bottom: "24px",
+          background: PALETTE.mustard,
+          color: PALETTE.bgDeep,
+          boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
+          zIndex: 50,
+        }}
+        aria-label="Новая спецификация"
+      >
+        <Plus size={26} />
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// App shell — theme, mode switch, routing between the six modes
 // ════════════════════════════════════════════════════════════════════════
 
 function ModeSwitch({ mode, onChange }) {
@@ -2807,6 +3054,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "pages", label: "Pages", Icon: BookOpen },
     { key: "words", label: "Слово", Icon: BookMarked },
     { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
+    { key: "specs", label: "Спецификации", Icon: NotebookPen },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -2834,6 +3082,7 @@ export default function App() {
   const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
+  const { texts: specs, addText: addSpec, updateText: updateSpec, deleteText: deleteSpec } = useTextDocs("specs-v1");
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -2843,6 +3092,8 @@ export default function App() {
   const [openWordId, setOpenWordId] = useState(null);
   const [wordCreating, setWordCreating] = useState(false);
   const [wordEditingId, setWordEditingId] = useState(null);
+  const [openSpecId, setOpenSpecId] = useState(null);
+  const [specCreating, setSpecCreating] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
 
@@ -2851,7 +3102,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary"].includes(res.value)) setMode(res.value);
+        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs"].includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -2902,6 +3153,7 @@ export default function App() {
   const editingText = texts.find((t) => t.id === pagesEditingId) || null;
   const openWord = words.find((w) => w.id === openWordId) || null;
   const editingWord = words.find((w) => w.id === wordEditingId) || null;
+  const openSpec = specs.find((s) => s.id === openSpecId) || null;
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -2971,6 +3223,24 @@ export default function App() {
             isDark={isDark}
             onToggleTheme={toggleTheme}
           />
+        ) : mode === "specs" && specCreating ? (
+          <SpecCreateScreen
+            onCancel={() => setSpecCreating(false)}
+            onSave={(body) => {
+              if (body.trim()) addSpec(deriveSpecTitle(body, specs.map((s) => s.title)), body);
+              setSpecCreating(false);
+            }}
+          />
+        ) : mode === "specs" && openSpec ? (
+          <SpecEditScreen
+            spec={openSpec}
+            onCancel={() => setOpenSpecId(null)}
+            onSave={(body) => {
+              const others = specs.filter((s) => s.id !== openSpec.id).map((s) => s.title);
+              updateSpec(openSpec.id, deriveSpecTitle(body, others), body);
+              setOpenSpecId(null);
+            }}
+          />
         ) : (
           <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
             <div className="text-center mb-2">
@@ -2986,6 +3256,8 @@ export default function App() {
                   ? "Твои слова"
                   : mode === "vocabulary"
                   ? "Vocabulary"
+                  : mode === "specs"
+                  ? "Спецификации"
                   : "Твои тексты"}
               </h1>
             </div>
@@ -3013,6 +3285,8 @@ export default function App() {
               />
             ) : mode === "vocabulary" ? (
               <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
+            ) : mode === "specs" ? (
+              <SpecsList specs={specs} onOpen={setOpenSpecId} onDelete={deleteSpec} onCreate={() => setSpecCreating(true)} />
             ) : (
               <PagesList
                 texts={texts}
