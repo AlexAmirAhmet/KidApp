@@ -29,6 +29,7 @@ import {
   Highlighter,
   Copy,
   NotebookPen,
+  X,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -2862,20 +2863,17 @@ function SpecEditScreen({ spec, onCancel, onSave }) {
 // The Specs dashboard: a flat list with per-row checkboxes for multi-select,
 // a "Выделить всё"/"Снять выделение" toggle, "Скопировать выбранное" once
 // something's picked (joining the chosen entries' full text with a clear
-// "---" separator), per-row delete, and the "+" FAB — which, instead of
-// navigating anywhere, transforms in place into a compact paste target.
+// "---" separator), per-row delete, and a full-width "+" card — matching
+// the Pages-style row cards — that flips in place to "Сохранить"/"Отмена"
+// on tap, reading the new entry straight from the clipboard rather than
+// showing a text field at all.
 function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
   const PALETTE = useTheme();
   const [selected, setSelected] = useState(() => new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [pasting, setPasting] = useState(false);
-  const [draft, setDraft] = useState("");
-  const textareaRef = useRef(null);
-
-  useEffect(() => {
-    if (pasting) textareaRef.current?.focus();
-  }, [pasting]);
+  const [confirming, setConfirming] = useState(false);
+  const [pasteError, setPasteError] = useState(false);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -2903,14 +2901,28 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
     }
   };
 
-  const handleSaveDraft = () => {
-    if (draft.trim()) onSaveNew(draft);
-    setDraft("");
-    setPasting(false);
+  const handleSaveFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        setPasteError(true);
+        return;
+      }
+      onSaveNew(text);
+      setPasteError(false);
+      setConfirming(false);
+    } catch (e) {
+      setPasteError(true);
+    }
+  };
+
+  const handleCancelCreate = () => {
+    setConfirming(false);
+    setPasteError(false);
   };
 
   return (
-    <div className="w-full max-w-md px-6 pt-8 pb-28">
+    <div className="w-full max-w-md px-6 pt-8 pb-10">
       {specs.length > 0 && (
         <div className="flex items-center gap-2 mb-4">
           <button
@@ -2993,42 +3005,43 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
         ))
       )}
 
-      <div className="fixed left-0 right-0 bottom-6 flex justify-center" style={{ zIndex: 50 }}>
-        <div className="max-w-md w-full px-6 flex justify-end items-end gap-2">
-          {pasting && (
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Вставь текст…"
-              rows={3}
-              className="flex-1 rounded-2xl p-3 outline-none resize-none"
-              style={{
-                background: PALETTE.card,
-                color: PALETTE.ink,
-                fontFamily: "'IBM Plex Sans', sans-serif",
-                fontSize: "0.9rem",
-                border: `1px solid ${PALETTE.cardEdge}`,
-                boxShadow: "0 8px 20px rgba(123,63,160,0.25)",
-              }}
-            />
+      {confirming ? (
+        <div
+          className="w-full rounded-2xl px-3 py-3"
+          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+        >
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveFromClipboard}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
+              style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              <Check size={16} /> Сохранить
+            </button>
+            <button
+              onClick={handleCancelCreate}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
+              style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              <X size={16} /> Отмена
+            </button>
+          </div>
+          {pasteError && (
+            <p className="text-xs text-center mt-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+              Скопируй текст перед вставкой
+            </p>
           )}
-          <button
-            onClick={() => (pasting ? handleSaveDraft() : setPasting(true))}
-            className={`rounded-full flex items-center justify-center shrink-0 ${pasting ? "animate-pulse" : ""}`}
-            style={{
-              width: "60px",
-              height: "60px",
-              background: PALETTE.mustard,
-              color: PALETTE.bgDeep,
-              boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
-            }}
-            aria-label={pasting ? "Сохранить" : "Новая спецификация"}
-          >
-            {pasting ? <Check size={26} /> : <Plus size={26} />}
-          </button>
         </div>
-      </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          className="w-full flex items-center justify-center py-3 rounded-2xl"
+          style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: "0 2px 8px rgba(140,155,165,0.12)" }}
+          aria-label="Новая спецификация"
+        >
+          <Plus size={22} style={{ color: PALETTE.mustard }} />
+        </button>
+      )}
     </div>
   );
 }
