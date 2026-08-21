@@ -2818,64 +2818,6 @@ function deriveSpecTitle(body, existingTitles) {
   return `Спецификация №${maxN + 1}`;
 }
 
-// Tap 1 (the dashboard's "+") lands here: a full-screen textarea, already
-// focused, keyboard already up — no intermediate "enter a title" screen.
-// The same "+" button is rendered again here, in the same fixed position,
-// now showing a checkmark and pulsing gently so the eye stays on it — tap 2
-// saves immediately, no confirmation step.
-function SpecCreateScreen({ onCancel, onSave }) {
-  const PALETTE = useTheme();
-  const [body, setBody] = useState("");
-  const textareaRef = useRef(null);
-
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
-  return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
-      <div className="max-w-md mx-auto w-full px-6 pt-8 shrink-0">
-        <button onClick={onCancel} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Отмена
-        </button>
-      </div>
-      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-24 flex-1 min-h-0 flex flex-col">
-        <textarea
-          ref={textareaRef}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Начни печатать — заголовок появится сам, из первой строки…"
-          className="flex-1 w-full rounded-xl p-4 outline-none resize-none"
-          style={{
-            background: PALETTE.card,
-            color: PALETTE.ink,
-            fontFamily: "'IBM Plex Sans', sans-serif",
-            fontSize: "0.95rem",
-            border: `1px solid ${PALETTE.cardEdge}`,
-          }}
-        />
-      </div>
-      <button
-        onClick={() => onSave(body)}
-        className="fixed rounded-full flex items-center justify-center animate-pulse"
-        style={{
-          width: "60px",
-          height: "60px",
-          right: "24px",
-          bottom: "24px",
-          background: PALETTE.mustard,
-          color: PALETTE.bgDeep,
-          boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
-          zIndex: 50,
-        }}
-        aria-label="Сохранить"
-      >
-        <Check size={26} />
-      </button>
-    </div>
-  );
-}
-
 // Opening an existing entry uses the app's standard edit pattern instead —
 // explicit Save/Cancel, no FAB — since the two-tap speed path above is
 // specifically about capturing something new as fast as possible.
@@ -2917,15 +2859,23 @@ function SpecEditScreen({ spec, onCancel, onSave }) {
   );
 }
 
-// The Specs dashboard: a flat list with per-row checkboxes for multi-select
-// ("Скопировать выбранное" appears once something's picked, joining the
-// chosen entries' full text with a clear "---" separator), per-row delete,
-// and the fixed "+" FAB that kicks off the two-tap create flow above.
-function SpecsList({ specs, onOpen, onDelete, onCreate }) {
+// The Specs dashboard: a flat list with per-row checkboxes for multi-select,
+// a "Выделить всё"/"Снять выделение" toggle, "Скопировать выбранное" once
+// something's picked (joining the chosen entries' full text with a clear
+// "---" separator), per-row delete, and the "+" FAB — which, instead of
+// navigating anywhere, transforms in place into a compact paste target.
+function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
   const PALETTE = useTheme();
   const [selected, setSelected] = useState(() => new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [draft, setDraft] = useState("");
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (pasting) textareaRef.current?.focus();
+  }, [pasting]);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -2934,6 +2884,11 @@ function SpecsList({ specs, onOpen, onDelete, onCreate }) {
       else next.add(id);
       return next;
     });
+  };
+
+  const allSelected = specs.length > 0 && specs.every((s) => selected.has(s.id));
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(specs.map((s) => s.id)));
   };
 
   const handleCopySelected = async () => {
@@ -2948,16 +2903,33 @@ function SpecsList({ specs, onOpen, onDelete, onCreate }) {
     }
   };
 
+  const handleSaveDraft = () => {
+    if (draft.trim()) onSaveNew(draft);
+    setDraft("");
+    setPasting(false);
+  };
+
   return (
     <div className="w-full max-w-md px-6 pt-8 pb-28">
-      {selected.size > 0 && (
-        <button
-          onClick={handleCopySelected}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium mb-4"
-          style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать выбранное (${selected.size})`}
-        </button>
+      {specs.length > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={toggleSelectAll}
+            className="text-xs px-3 py-1.5 rounded-full shrink-0"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            {allSelected ? "Снять выделение" : "Выделить всё"}
+          </button>
+          {selected.size > 0 && (
+            <button
+              onClick={handleCopySelected}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
+              style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать выбранное (${selected.size})`}
+            </button>
+          )}
+        </div>
       )}
 
       {specs.length === 0 ? (
@@ -3021,23 +2993,42 @@ function SpecsList({ specs, onOpen, onDelete, onCreate }) {
         ))
       )}
 
-      <button
-        onClick={onCreate}
-        className="fixed rounded-full flex items-center justify-center"
-        style={{
-          width: "60px",
-          height: "60px",
-          right: "24px",
-          bottom: "24px",
-          background: PALETTE.mustard,
-          color: PALETTE.bgDeep,
-          boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
-          zIndex: 50,
-        }}
-        aria-label="Новая спецификация"
-      >
-        <Plus size={26} />
-      </button>
+      <div className="fixed left-0 right-0 bottom-6 flex justify-center" style={{ zIndex: 50 }}>
+        <div className="max-w-md w-full px-6 flex justify-end items-end gap-2">
+          {pasting && (
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Вставь текст…"
+              rows={3}
+              className="flex-1 rounded-2xl p-3 outline-none resize-none"
+              style={{
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                fontSize: "0.9rem",
+                border: `1px solid ${PALETTE.cardEdge}`,
+                boxShadow: "0 8px 20px rgba(123,63,160,0.25)",
+              }}
+            />
+          )}
+          <button
+            onClick={() => (pasting ? handleSaveDraft() : setPasting(true))}
+            className={`rounded-full flex items-center justify-center shrink-0 ${pasting ? "animate-pulse" : ""}`}
+            style={{
+              width: "60px",
+              height: "60px",
+              background: PALETTE.mustard,
+              color: PALETTE.bgDeep,
+              boxShadow: "0 8px 20px rgba(123,63,160,0.45)",
+            }}
+            aria-label={pasting ? "Сохранить" : "Новая спецификация"}
+          >
+            {pasting ? <Check size={26} /> : <Plus size={26} />}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3093,7 +3084,6 @@ export default function App() {
   const [wordCreating, setWordCreating] = useState(false);
   const [wordEditingId, setWordEditingId] = useState(null);
   const [openSpecId, setOpenSpecId] = useState(null);
-  const [specCreating, setSpecCreating] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
 
@@ -3223,14 +3213,6 @@ export default function App() {
             isDark={isDark}
             onToggleTheme={toggleTheme}
           />
-        ) : mode === "specs" && specCreating ? (
-          <SpecCreateScreen
-            onCancel={() => setSpecCreating(false)}
-            onSave={(body) => {
-              if (body.trim()) addSpec(deriveSpecTitle(body, specs.map((s) => s.title)), body);
-              setSpecCreating(false);
-            }}
-          />
         ) : mode === "specs" && openSpec ? (
           <SpecEditScreen
             spec={openSpec}
@@ -3286,7 +3268,12 @@ export default function App() {
             ) : mode === "vocabulary" ? (
               <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
             ) : mode === "specs" ? (
-              <SpecsList specs={specs} onOpen={setOpenSpecId} onDelete={deleteSpec} onCreate={() => setSpecCreating(true)} />
+              <SpecsList
+                specs={specs}
+                onOpen={setOpenSpecId}
+                onDelete={deleteSpec}
+                onSaveNew={(body) => addSpec(deriveSpecTitle(body, specs.map((s) => s.title)), body)}
+              />
             ) : (
               <PagesList
                 texts={texts}
