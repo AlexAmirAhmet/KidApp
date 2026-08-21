@@ -2822,39 +2822,34 @@ function deriveSpecTitle(body, existingTitles) {
 // Opening an existing entry uses the app's standard edit pattern instead —
 // explicit Save/Cancel, no FAB — since the two-tap speed path above is
 // specifically about capturing something new as fast as possible.
-function SpecEditScreen({ spec, onCancel, onSave }) {
+// Read-only: opening a spec is for reading and text-selecting (for the
+// global SelectionCapture → "Добавить в Vocabulary" flow), never editing —
+// plain scrollable text, no input/textarea, so no cursor or keyboard ever
+// appears.
+function SpecViewScreen({ spec, onBack }) {
   const PALETTE = useTheme();
-  const [body, setBody] = useState(spec.body);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
-      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
-        <button onClick={onCancel} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> Отмена
-        </button>
-        <button
-          onClick={() => onSave(body)}
-          disabled={!body.trim()}
-          className="px-4 py-2 rounded-full text-sm font-medium disabled:opacity-40"
-          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
-        >
-          Сохранить
+      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> Назад
         </button>
       </div>
       <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10 flex-1 min-h-0 flex flex-col">
-        <textarea
-          autoFocus
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          className="flex-1 w-full rounded-xl p-4 outline-none resize-none"
+        <div
+          className="flex-1 w-full rounded-xl p-4 overflow-y-auto whitespace-pre-wrap"
           style={{
             background: PALETTE.card,
             color: PALETTE.ink,
             fontFamily: "'IBM Plex Sans', sans-serif",
             fontSize: "0.95rem",
+            lineHeight: 1.7,
             border: `1px solid ${PALETTE.cardEdge}`,
           }}
-        />
+        >
+          {spec.body}
+        </div>
       </div>
     </div>
   );
@@ -3086,7 +3081,7 @@ export default function App() {
   const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
-  const { texts: specs, addText: addSpec, updateText: updateSpec, deleteText: deleteSpec } = useTextDocs("specs-v1");
+  const { texts: specs, addText: addSpec, deleteText: deleteSpec } = useTextDocs("specs-v1");
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -3227,15 +3222,7 @@ export default function App() {
             onToggleTheme={toggleTheme}
           />
         ) : mode === "specs" && openSpec ? (
-          <SpecEditScreen
-            spec={openSpec}
-            onCancel={() => setOpenSpecId(null)}
-            onSave={(body) => {
-              const others = specs.filter((s) => s.id !== openSpec.id).map((s) => s.title);
-              updateSpec(openSpec.id, deriveSpecTitle(body, others), body);
-              setOpenSpecId(null);
-            }}
-          />
+          <SpecViewScreen spec={openSpec} onBack={() => setOpenSpecId(null)} />
         ) : (
           <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
             <div className="text-center mb-2">
