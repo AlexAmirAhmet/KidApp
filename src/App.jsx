@@ -69,6 +69,7 @@ const LIGHT_PALETTE = {
   bgDeep: "#FFFFFF",
   card: "#FFFFFF",
   cardEdge: "#DCD2F0",
+  cardHighlight: "rgba(255,255,255,0.8)",
   ink: "#2A0E4E",
   mint: "#9C5FC7",
   mintDeep: "#5B2578",
@@ -79,23 +80,25 @@ const LIGHT_PALETTE = {
   danger: "#C1502E",
 };
 
-// "Густой бархат" — the dark theme. Card stays light/lavender even here,
-// like a physical card on a dark desk — same principle the app has always
-// used, just re-tinted purple instead of cream.
+// "Густой бархат" — the dark theme. Every card-style surface (elevated
+// tiles, flashcards, the Pages reading surface, form fields) inverts along
+// with everything else: dark fill, light text — same rule the list-row
+// "chip" surfaces already followed, now applied without exception.
 const DARK_PALETTE = {
   bg: "#0F0518",
   bgGlow: "#1B0C2E",
   chip: "#241040",
   bgDeep: "#150826",
-  card: "#E0D2F5",
+  card: "#2E1652",
   cardEdge: "#D0BAE8",
-  ink: "#2A0E4E",
+  cardHighlight: "rgba(255,255,255,0.08)",
+  ink: "#EDE4FA",
   mint: "#C3A6FF",
-  mintDeep: "#5B2578",
+  mintDeep: "#C3A6FF",
   mustard: "#9D7BFF",
   fadeText: "#B794F4",
   cream: "#EDE4FA",
-  waiting: "#8A6FA0",
+  waiting: "#AC9BC7",
   danger: "#C1502E",
 };
 
@@ -275,8 +278,9 @@ function useDecks() {
 }
 
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
-function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp }) {
+function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp, reversed }) {
   const PALETTE = useTheme();
+  const showEnglishSide = reversed ? flipped : !flipped;
   const [dy, setDy] = useState(0);
   const [dragging, setDragging] = useState(false);
   const drag = useRef({ startY: 0, startX: 0, suppressClick: false });
@@ -358,7 +362,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
           transition: dragging ? "none" : "transform 0.35s cubic-bezier(.2,.8,.3,1)",
           opacity: 1 - swipeProgress * 0.5,
           minHeight: "260px",
-          boxShadow: "0 16px 32px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset",
+          boxShadow: `0 16px 32px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`,
           border: `1px solid ${PALETTE.cardEdge}`,
         }}
       >
@@ -366,7 +370,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
           className="absolute top-4 left-1/2 -translate-x-1/2 w-10 h-3 rounded-full"
           style={{ background: "rgba(140,155,165,0.18)" }}
         />
-        {!flipped ? (
+        {showEnglishSide ? (
           <>
             {/* The term currently being studied — not selectable/capturable
                 into Vocabulary, since adding a word to a vocabulary list
@@ -519,24 +523,31 @@ function CardForm({ initial, onSave, onCancel, saveLabel = "Сохранить" 
 
 // `resetScopeLabel`, when provided (Focus mode only), shows a "reset all
 // active back to waiting" button scoped to the whole current goal tree.
-function PracticeView({ deck, resetScopeLabel }) {
+function PracticeView({ deck, resetScopeLabel, deckKey }) {
   const PALETTE = useTheme();
   const activeItems = deck.items.filter((i) => i.status === "active");
-  const [order, setOrder] = useState(activeItems.map((_, i) => i));
+  // Sequence tracked by id, not index — so removing/editing one card in
+  // place (swiping it to the long box, saving an edit) never has to guess
+  // at index math. Only a genuine deck/goal switch (deckKey changing)
+  // rebuilds the sequence from scratch and resets position to the start;
+  // within the same deck, moveCurrentToWaiting below updates orderIds and
+  // pos itself so browsing position survives a card leaving the active set.
+  const [orderIds, setOrderIds] = useState(() => activeItems.map((i) => i.id));
   const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [rotation, setRotation] = useState(-1.5);
   const [showTranscription, setShowTranscription] = useTranscription();
   const [editing, setEditing] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [reversed, setReversed] = useState(false);
 
   useEffect(() => {
-    setOrder(deck.items.filter((i) => i.status === "active").map((_, i) => i));
+    setOrderIds(deck.items.filter((i) => i.status === "active").map((i) => i.id));
     setPos(0);
     setFlipped(false);
     setEditing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deck.items]);
+  }, [deckKey]);
 
   const resetAllActive = () => {
     deck.setItems(deck.items.map((i) => (i.status === "active" ? { ...i, status: "waiting" } : i)));
@@ -582,18 +593,18 @@ function PracticeView({ deck, resetScopeLabel }) {
     );
   }
 
-  const currentIndex = order[pos] ?? 0;
-  const item = activeItems[currentIndex] || activeItems[0];
+  const currentId = orderIds[pos] ?? orderIds[0];
+  const item = activeItems.find((i) => i.id === currentId) || activeItems[0];
 
   const goTo = (newPos) => {
     setRotation((Math.random() - 0.5) * 4);
     setFlipped(false);
     setEditing(false);
-    setPos((newPos + order.length) % order.length);
+    setPos((newPos + orderIds.length) % orderIds.length);
   };
 
   const handleShuffle = () => {
-    setOrder(shuffleArr(order));
+    setOrderIds(shuffleArr(orderIds));
     setPos(0);
     setFlipped(false);
     setEditing(false);
@@ -601,7 +612,11 @@ function PracticeView({ deck, resetScopeLabel }) {
   };
 
   const moveCurrentToWaiting = () => {
-    deck.setItems(deck.items.map((i) => (i.id === item.id ? { ...i, status: "waiting" } : i)));
+    const removedId = item.id;
+    deck.setItems(deck.items.map((i) => (i.id === removedId ? { ...i, status: "waiting" } : i)));
+    const nextOrder = orderIds.filter((id) => id !== removedId);
+    setOrderIds(nextOrder);
+    setPos((p) => Math.min(p, Math.max(nextOrder.length - 1, 0)));
   };
 
   const saveEdit = (fields) => {
@@ -617,7 +632,7 @@ function PracticeView({ deck, resetScopeLabel }) {
           className="text-sm shrink-0"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, letterSpacing: "0.05em" }}
         >
-          {pos + 1} / {order.length}
+          {pos + 1} / {orderIds.length}
         </span>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {resetScopeLabel && (
@@ -668,6 +683,7 @@ function PracticeView({ deck, resetScopeLabel }) {
             rotation={rotation}
             showTranscription={showTranscription}
             onSwipeUp={moveCurrentToWaiting}
+            reversed={reversed}
           />
 
           <div className="flex items-center gap-6 mt-10">
@@ -703,8 +719,24 @@ function PracticeView({ deck, resetScopeLabel }) {
           </div>
 
           <button
+            onClick={() => {
+              setReversed((r) => !r);
+              setFlipped(false);
+            }}
+            title="Поменять местами лицевую и обратную стороны карточки"
+            className="flex items-center gap-2 mt-4 text-sm px-3 py-1.5 rounded-full"
+            style={{
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              background: reversed ? PALETTE.mustard : PALETTE.chip,
+              color: reversed ? PALETTE.bgDeep : PALETTE.fadeText,
+            }}
+          >
+            <RotateCcw size={14} /> Реверс{reversed ? ": вкл" : ""}
+          </button>
+
+          <button
             onClick={handleShuffle}
-            className="flex items-center gap-2 mt-6 text-sm"
+            className="flex items-center gap-2 mt-4 text-sm"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
           >
             <Shuffle size={15} /> перемешать колоду
@@ -1072,7 +1104,7 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
         </div>
       </div>
 
-      {tab === "practice" && <PracticeView deck={deck} />}
+      {tab === "practice" && <PracticeView deck={deck} deckKey={deckId} />}
       {tab === "list" && <ListView deck={deck} />}
       {tab === "add" && <BulkAddForm onAdd={(items) => deck.setItems([...deck.items, ...items])} onDone={() => setTab("list")} />}
 
@@ -1209,10 +1241,11 @@ function CreateTile({ label, placeholder, onCreate, big }) {
 // Fixed-height tile name: clamps to 2 lines with an ellipsis so every grid
 // tile stays the same height regardless of how long the name is.
 function TileName({ children }) {
+  const PALETTE = useTheme();
   return (
     <span
       className="mt-3 text-center line-clamp-2"
-      style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", lineHeight: 1.2, overflow: "hidden" }}
+      style={{ fontFamily: "'Fraunces', serif", fontSize: "1.3rem", lineHeight: 1.2, overflow: "hidden", color: PALETTE.ink }}
     >
       {children}
     </span>
@@ -1248,7 +1281,7 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
             style={{
               height: "182px",
               background: PALETTE.card,
-              boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset",
+              boxShadow: `0 16px 34px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`,
               border: `1px solid ${PALETTE.cardEdge}`,
             }}
           >
@@ -1256,7 +1289,7 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
               className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
               style={{
                 background: PALETTE.card,
-                boxShadow: "0 10px 20px rgba(140,155,165,0.32), 0 2px 0 rgba(255,255,255,0.8) inset",
+                boxShadow: `0 10px 20px rgba(140,155,165,0.32), 0 2px 0 ${PALETTE.cardHighlight} inset`,
                 border: `1px solid ${PALETTE.cardEdge}`,
               }}
             >
@@ -1619,7 +1652,7 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
           </button>
           <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
         </div>
-        <PracticeView deck={practiceDeck} resetScopeLabel={`цели «${goal.name}»`} />
+        <PracticeView deck={practiceDeck} resetScopeLabel={`цели «${goal.name}»`} deckKey={goal.id} />
       </div>
     );
   }
@@ -1812,11 +1845,11 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
           key={goal.id}
           onClick={() => onOpen(goal.id)}
           className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
-          style={{ height: "182px", background: PALETTE.card, boxShadow: "0 16px 34px rgba(140,155,165,0.28), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
+          style={{ height: "182px", background: PALETTE.card, boxShadow: `0 16px 34px rgba(140,155,165,0.28), 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
         >
           <span
             className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
-            style={{ background: PALETTE.card, boxShadow: "0 10px 20px rgba(140,155,165,0.32), 0 2px 0 rgba(255,255,255,0.8) inset", border: `1px solid ${PALETTE.cardEdge}` }}
+            style={{ background: PALETTE.card, boxShadow: `0 10px 20px rgba(140,155,165,0.32), 0 2px 0 ${PALETTE.cardHighlight} inset`, border: `1px solid ${PALETTE.cardEdge}` }}
           >
             <Target size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
           </span>
@@ -2930,10 +2963,10 @@ function SpecsList({ specs, onOpen, onDelete, onSaveNew }) {
           {selected.size > 0 && (
             <button
               onClick={handleCopySelected}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-medium"
+              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-full text-xs whitespace-nowrap"
               style={{ background: copied ? PALETTE.mint : PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Скопировано" : `Скопировать выбранное (${selected.size})`}
+              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Скопировано" : `Копировать (${selected.size})`}
             </button>
           )}
         </div>
