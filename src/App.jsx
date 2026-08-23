@@ -3410,6 +3410,23 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 
   const isAudioMode = split < VIDEO_AUDIO_THRESHOLD;
 
+  // Best-effort nudge to get mobile Chrome to auto-hide its address bar on
+  // entry, instead of making the user scroll once manually — without it,
+  // the extra bar height can clip the bottom control row until they do.
+  // This is a browser affordance a page can only request, never guarantee:
+  // scrolling 1px is the standard trick and it works because the layout is
+  // sized with 100vh (h-screen), which mobile Chrome measures as if the
+  // bar were already hidden, leaving just enough real scroll slack for
+  // this to register. It depends on browser/OS/timing and may simply do
+  // nothing on some devices — that's an accepted, unfixable limitation,
+  // not a bug to chase further.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      window.scrollTo(0, 1);
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   // Mount the YouTube player once per video, tear it down on unmount/video change.
   useEffect(() => {
     let cancelled = false;
