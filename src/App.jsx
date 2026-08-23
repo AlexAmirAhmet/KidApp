@@ -34,6 +34,7 @@ import {
   Play,
   Pause,
   ChevronUp,
+  Minus,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -324,8 +325,14 @@ const STRINGS = {
   "Увеличить размер шрифта": { en: "Increase font size" },
   "Уменьшить размер шрифта": { en: "Decrease font size" },
   "Сначала": { en: "From the beginning" },
-  "Перемотать на 10 секунд назад (двойной тап)": { en: "Rewind 10 seconds (double-tap)" },
-  "Перемотать на 10 секунд вперёд (двойной тап)": { en: "Fast-forward 10 seconds (double-tap)" },
+  "Перемотка назад (двойной тап, повторный тап — ещё −10 сек)": {
+    en: "Rewind (double-tap, tap again for another −10s)",
+  },
+  "Перемотка вперёд (двойной тап, повторный тап — ещё +10 сек)": {
+    en: "Fast-forward (double-tap, tap again for another +10s)",
+  },
+  "Остановить прокрутку текста": { en: "Stop text auto-scroll" },
+  "Запустить прокрутку текста": { en: "Start text auto-scroll" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -3381,9 +3388,10 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
   const dragRef = useRef({ startY: 0, startSplit: VIDEO_DEFAULT_SPLIT, regionHeight: 0 });
   const manualScrollUntil = useRef(0);
   const rafRef = useRef(null);
-  const lastTapRef = useRef({ left: 0, right: 0 });
+  const tapBurstRef = useRef({ left: { count: 0, last: 0 }, right: { count: 0, last: 0 } });
   const seekFlashTimeoutRef = useRef(null);
   const scrollAccumRef = useRef(0);
+  const percentLabelRef = useRef(null);
 
   const [split, setSplit] = useState(VIDEO_DEFAULT_SPLIT);
   const [dragging, setDragging] = useState(false);
@@ -3393,6 +3401,8 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(VIDEO_SCROLL_SPEED_DEFAULT);
   const [fontSize, setFontSize] = useState(VIDEO_FONT_SIZE_DEFAULT);
+  const [scrollPlaying, setScrollPlaying] = useState(true);
+  // { side: "left" | "right", seconds: number } | null
   const [seekFlash, setSeekFlash] = useState(null);
 
   const isAudioMode = split < VIDEO_AUDIO_THRESHOLD;
@@ -3451,18 +3461,31 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
   }, [playing]);
 
   // Auto-scroll the subtitle panel autonomously at the chosen speed,
-  // independent of play/pause — it keeps running through a paused video and
-  // only stops when this screen unmounts. A recent manual scroll
-  // (touch/wheel) suspends it briefly so the two don't fight each other.
+  // independent of video play/pause — it keeps running through a paused
+  // video and only stops when the user pauses it with the dedicated
+  // scroll play/stop control, or this screen unmounts. A recent manual
+  // scroll (touch/wheel) suspends it briefly so the two don't fight each
+  // other, and — critically — it also suspends the instant a text
+  // selection exists inside the panel: programmatically moving scrollTop
+  // while a native selection is anchored in the same element can silently
+  // collapse that selection on some mobile browsers, which is exactly what
+  // made picking a word for Vocabulary unreliable here (this is the only
+  // screen in the app with continuous auto-scroll running under the text
+  // the user is trying to select).
   useEffect(() => {
     let last = performance.now();
     let suspended = false;
+    const hasSelectionInside = (el) => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.anchorNode) return false;
+      return el.contains(sel.anchorNode) || (sel.focusNode && el.contains(sel.focusNode));
+    };
     const tick = (now) => {
       const dt = (now - last) / 1000;
       last = now;
       const el = textPanelRef.current;
       if (el) {
-        if (now <= manualScrollUntil.current) {
+        if (!scrollPlaying || now <= manualScrollUntil.current || hasSelectionInside(el)) {
           suspended = true;
         } else {
           // A fractional per-frame delta (e.g. ~0.4px at 60fps) gets
@@ -3470,8 +3493,8 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
           // el.scrollTop and read back each frame, so the panel never
           // visibly moves — accumulate the true position in a ref instead
           // and only round on write. Resync that ref to the DOM's actual
-          // position right after a manual-scroll suspension ends, so
-          // resuming doesn't jump back to wherever auto-scroll last was.
+          // position right after a suspension ends, so resuming doesn't
+          // jump back to wherever auto-scroll last was.
           if (suspended) {
             scrollAccumRef.current = el.scrollTop;
             suspended = false;
@@ -3479,12 +3502,17 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
           scrollAccumRef.current += SCROLL_PX_PER_SEC_PER_SPEED * speed * dt;
           el.scrollTop = scrollAccumRef.current;
         }
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        const pct = maxScroll > 0 ? Math.min(100, Math.max(0, Math.round((el.scrollTop / maxScroll) * 100))) : 0;
+        if (percentLabelRef.current) percentLabelRef.current.textContent = `${pct}%`;
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => rafRef.current && cancelAnimationFrame(rafRef.current);
-  }, [speed]);
+  }, [speed, scrollPlaying]);
+
+  const toggleScrollPlaying = () => setScrollPlaying((p) => !p);
 
   const suspendAutoScroll = () => {
     manualScrollUntil.current = performance.now() + 2500;
@@ -3552,21 +3580,23 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
     setCurrentTime(next);
   };
 
-  // Manual double-tap detection (rather than relying on native dblclick)
+  // Manual tap-burst detection (rather than relying on native dblclick)
   // works reliably across mobile browsers regardless of touch-action/zoom
-  // settings, mirroring YouTube's own left/right double-tap-to-seek gesture.
+  // settings, mirroring YouTube's own left/right double-tap-to-seek gesture
+  // — including how consecutive taps within the burst accumulate: the first
+  // tap only arms it, the second tap seeks ±10s, and every further tap
+  // within the window seeks another ±10s on top, with the running total
+  // shown next to the tapped side.
   const handleZoneTap = (side) => {
     const now = Date.now();
-    const last = lastTapRef.current[side];
-    if (now - last < DOUBLE_TAP_MS) {
-      seekBy(side === "left" ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS);
-      lastTapRef.current[side] = 0;
-      setSeekFlash(side);
-      if (seekFlashTimeoutRef.current) clearTimeout(seekFlashTimeoutRef.current);
-      seekFlashTimeoutRef.current = setTimeout(() => setSeekFlash(null), 450);
-    } else {
-      lastTapRef.current[side] = now;
-    }
+    const burst = tapBurstRef.current[side];
+    burst.count = now - burst.last < DOUBLE_TAP_MS ? burst.count + 1 : 1;
+    burst.last = now;
+    if (burst.count < 2) return;
+    seekBy(side === "left" ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS);
+    setSeekFlash({ side, seconds: (burst.count - 1) * SEEK_STEP_SECONDS });
+    if (seekFlashTimeoutRef.current) clearTimeout(seekFlashTimeoutRef.current);
+    seekFlashTimeoutRef.current = setTimeout(() => setSeekFlash(null), 700);
   };
 
   return (
@@ -3609,25 +3639,40 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
                   background: PALETTE.chip,
                   color: PALETTE.ink,
                   boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                  WebkitUserSelect: "none",
                 }}
               >
                 <RotateCcw size={14} />
               </button>
 
-              {/* Tap zones flanking the play/pause button: double-tap seeks
-                  ±10s, mirroring YouTube's own gesture. */}
-              <div className="w-full flex items-center justify-center relative" style={{ height: "52px" }}>
+              {/* Tap zones flanking the play/pause button: repeated taps
+                  within the burst window seek ±10s each, accumulating like
+                  YouTube's own gesture (2 taps = 10s, 3 = 20s, ...). These
+                  zones render plain digits, not the subtitle text, but
+                  still sit on top of a scrollable screen — user-select:
+                  none keeps a tap here from ever being mistaken for a word
+                  selection and popping the Vocabulary button over the
+                  seek indicator. */}
+              <div
+                className="w-full flex items-center justify-center relative"
+                style={{ height: "52px", userSelect: "none", WebkitUserSelect: "none" }}
+              >
                 <div
                   onClick={() => handleZoneTap("left")}
-                  aria-label={t("Перемотать на 10 секунд назад (двойной тап)")}
+                  aria-label={t("Перемотка назад (двойной тап, повторный тап — ещё −10 сек)")}
                   className="absolute inset-y-0 left-0 flex items-center justify-start pl-3"
                   style={{ width: "42%" }}
                 >
                   <span
                     className="text-xs font-medium"
-                    style={{ color: PALETTE.mustard, opacity: seekFlash === "left" ? 1 : 0, transition: "opacity 0.2s" }}
+                    style={{
+                      color: PALETTE.mustard,
+                      opacity: seekFlash?.side === "left" ? 1 : 0,
+                      transition: "opacity 0.2s",
+                    }}
                   >
-                    −10
+                    −{seekFlash?.side === "left" ? seekFlash.seconds : SEEK_STEP_SECONDS}
                   </span>
                 </div>
                 <button
@@ -3646,19 +3691,23 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
                 </button>
                 <div
                   onClick={() => handleZoneTap("right")}
-                  aria-label={t("Перемотать на 10 секунд вперёд (двойной тап)")}
+                  aria-label={t("Перемотка вперёд (двойной тап, повторный тап — ещё +10 сек)")}
                   className="absolute inset-y-0 right-0 flex items-center justify-end pr-3"
                   style={{ width: "42%" }}
                 >
                   <span
                     className="text-xs font-medium"
-                    style={{ color: PALETTE.mustard, opacity: seekFlash === "right" ? 1 : 0, transition: "opacity 0.2s" }}
+                    style={{
+                      color: PALETTE.mustard,
+                      opacity: seekFlash?.side === "right" ? 1 : 0,
+                      transition: "opacity 0.2s",
+                    }}
                   >
-                    +10
+                    +{seekFlash?.side === "right" ? seekFlash.seconds : SEEK_STEP_SECONDS}
                   </span>
                 </div>
               </div>
-              <div className="w-full flex items-center gap-2">
+              <div className="w-full flex items-center gap-2" style={{ userSelect: "none", WebkitUserSelect: "none" }}>
                 <span className="text-xs shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
                   {formatPlayerTime(currentTime)}
                 </span>
@@ -3692,87 +3741,145 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
           <div className="rounded-full" style={{ width: "40px", height: "4px", background: PALETTE.cardEdge }} />
         </div>
 
-        <div className="flex-1 min-h-0 flex gap-1">
-          <div
-            ref={textPanelRef}
-            onPointerDown={suspendAutoScroll}
-            onWheel={suspendAutoScroll}
-            className="flex-1 min-h-0 overflow-y-auto py-2 pr-1"
-          >
-            <p
-              className="whitespace-pre-wrap"
-              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: `${fontSize}rem`, lineHeight: 1.8 }}
-            >
-              {video.body}
-            </p>
+        <div className="flex-1 min-h-0 flex flex-col gap-2">
+          <div className="relative flex-1 min-h-0">
+            <div ref={textPanelRef} onPointerDown={suspendAutoScroll} onWheel={suspendAutoScroll} className="absolute inset-0 overflow-y-auto py-2">
+              <p
+                className="whitespace-pre-wrap"
+                style={{
+                  fontFamily: "'IBM Plex Sans', sans-serif",
+                  color: PALETTE.ink,
+                  fontSize: `${fontSize}rem`,
+                  lineHeight: 1.8,
+                  textAlign: "justify",
+                  textJustify: "inter-word",
+                }}
+              >
+                {video.body}
+              </p>
+            </div>
+
+            {/* A thin line fixed at the vertical center of the text area —
+                the text scrolls through it, it never moves — plus a live
+                percentage of how far the scroll has gotten, so a user who
+                looks away can find their place again at a glance. It's a
+                sibling of the scrollable panel (not inside it), positioned
+                against this shared "relative" parent, so it stays put
+                regardless of scroll position; pointer-events: none lets
+                taps pass straight through to the text/selection below. */}
+            <div className="absolute left-0 right-0 pointer-events-none" style={{ top: "50%", transform: "translateY(-50%)" }}>
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex-1" style={{ height: "1px", background: PALETTE.cardEdge }} />
+                <span
+                  ref={percentLabelRef}
+                  className="text-[10px] shrink-0"
+                  style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
+                >
+                  0%
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="w-8 shrink-0 flex flex-col items-center justify-center gap-1">
-            <button
-              onClick={() => adjustSpeed(VIDEO_SCROLL_SPEED_STEP)}
-              aria-label={t("Увеличить скорость прокрутки")}
-              className="rounded-full flex items-center justify-center"
-              style={{
-                width: "28px",
-                height: "28px",
-                background: PALETTE.chip,
-                color: PALETTE.ink,
-                boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
-              }}
-            >
-              <ChevronUp size={13} />
-            </button>
-            <span className="text-[10px] leading-none" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-              ×{speed}
-            </span>
-            <button
-              onClick={() => adjustSpeed(-VIDEO_SCROLL_SPEED_STEP)}
-              aria-label={t("Уменьшить скорость прокрутки")}
-              className="rounded-full flex items-center justify-center"
-              style={{
-                width: "28px",
-                height: "28px",
-                background: PALETTE.chip,
-                color: PALETTE.ink,
-                boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
-              }}
-            >
-              <ChevronDown size={13} />
-            </button>
-
-            <div className="rounded-full" style={{ width: "16px", height: "1px", background: PALETTE.cardEdge, margin: "6px 0" }} />
-
-            <button
-              onClick={() => adjustFontSize(VIDEO_FONT_SIZE_STEP)}
-              aria-label={t("Увеличить размер шрифта")}
-              className="rounded-full flex items-center justify-center"
-              style={{
-                width: "28px",
-                height: "28px",
-                background: PALETTE.chip,
-                color: PALETTE.ink,
-                boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
-              }}
-            >
-              <ChevronUp size={13} />
-            </button>
-            <span className="text-[10px] leading-none" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-              Aa
-            </span>
-            <button
-              onClick={() => adjustFontSize(-VIDEO_FONT_SIZE_STEP)}
-              aria-label={t("Уменьшить размер шрифта")}
-              className="rounded-full flex items-center justify-center"
-              style={{
-                width: "28px",
-                height: "28px",
-                background: PALETTE.chip,
-                color: PALETTE.ink,
-                boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
-              }}
-            >
-              <ChevronDown size={13} />
-            </button>
+          {/* Bottom control bar: 5 equal, delicate neumorphic sections —
+              font size (-/+), text auto-scroll play/stop, scroll speed
+              (-/+) — replacing the old side column so the text can use
+              nearly the full width. */}
+          <div
+            className="grid grid-cols-5 shrink-0 rounded-2xl overflow-hidden"
+            style={{ background: PALETTE.chip, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+          >
+            <div className="flex items-center justify-center py-2">
+              <button
+                onClick={() => adjustFontSize(-VIDEO_FONT_SIZE_STEP)}
+                aria-label={t("Уменьшить размер шрифта")}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  background: PALETTE.card,
+                  color: PALETTE.ink,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                }}
+              >
+                <span style={{ fontSize: "0.7rem", fontWeight: 500 }}>A</span>
+              </button>
+            </div>
+            <div className="flex items-center justify-center py-2">
+              <button
+                onClick={() => adjustFontSize(VIDEO_FONT_SIZE_STEP)}
+                aria-label={t("Увеличить размер шрифта")}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  background: PALETTE.card,
+                  color: PALETTE.ink,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                }}
+              >
+                <span style={{ fontSize: "1.2rem", fontWeight: 500 }}>A</span>
+              </button>
+            </div>
+            <div className="flex items-center justify-center py-2">
+              <button
+                onClick={toggleScrollPlaying}
+                aria-label={scrollPlaying ? t("Остановить прокрутку текста") : t("Запустить прокрутку текста")}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  background: PALETTE.mustard,
+                  color: PALETTE.bgDeep,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                }}
+              >
+                {scrollPlaying ? <Pause size={17} strokeWidth={1.75} /> : <Play size={17} strokeWidth={1.75} style={{ marginLeft: "2px" }} />}
+              </button>
+            </div>
+            <div className="flex items-center justify-center py-2">
+              <button
+                onClick={() => adjustSpeed(-VIDEO_SCROLL_SPEED_STEP)}
+                aria-label={t("Уменьшить скорость прокрутки")}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  background: PALETTE.card,
+                  color: PALETTE.ink,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                }}
+              >
+                <Minus size={17} strokeWidth={1.5} />
+              </button>
+            </div>
+            <div className="flex flex-col items-center justify-center py-2 gap-0.5">
+              <button
+                onClick={() => adjustSpeed(VIDEO_SCROLL_SPEED_STEP)}
+                aria-label={t("Увеличить скорость прокрутки")}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  background: PALETTE.card,
+                  color: PALETTE.ink,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  userSelect: "none",
+                }}
+              >
+                <Plus size={17} strokeWidth={1.5} />
+              </button>
+              <span
+                className="text-[10px] leading-none"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
+              >
+                ×{speed}
+              </span>
+            </div>
           </div>
         </div>
       </div>
