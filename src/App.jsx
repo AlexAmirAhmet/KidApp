@@ -30,6 +30,10 @@ import {
   Copy,
   NotebookPen,
   X,
+  Video,
+  Play,
+  Pause,
+  ChevronUp,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -307,6 +311,16 @@ const STRINGS = {
   "Слов пока нет. Добавь первое — с разметкой «## / > ».": { en: "No words yet. Add your first one — using “## / >” markup." },
   "Новое слово": { en: "New word" },
   "В этом разделе пока нет карточек.": { en: "No cards in this section yet." },
+  "Видео": { en: "Video" },
+  "Твои видео": { en: "Your videos" },
+  "Ссылка на YouTube-видео": { en: "YouTube video link" },
+  "Не удалось распознать ссылку на YouTube-видео": { en: "Couldn't recognize that as a YouTube video link" },
+  "Вставь текст или субтитры к видео": { en: "Paste the text or subtitles for the video" },
+  "Видео пока нет. Добавь первое по ссылке.": { en: "No videos yet. Add your first one by link." },
+  "Добавить видео": { en: "Add video" },
+  "Увеличить скорость прокрутки": { en: "Increase scroll speed" },
+  "Уменьшить скорость прокрутки": { en: "Decrease scroll speed" },
+  "Перетащить границу видео/текста": { en: "Drag the video/text divider" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -3133,6 +3147,486 @@ function VocabularyList({ entries, onDelete, onClearAll }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// VIDEO — saved YouTube videos with attached subtitle text, played through
+// the YouTube IFrame Player API right inside the app. A draggable handle
+// between the video and the text panel adjusts how much screen each gets;
+// dragged to the top, the video collapses into a compact audio-only panel
+// (play/pause, progress, timing) without ever destroying the player, so
+// playback continues uninterrupted across the transition.
+// ════════════════════════════════════════════════════════════════════════
+
+function extractYouTubeId(url) {
+  const m = (url || "").match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function deriveVideoTitle(body, existingTitles) {
+  const firstLine = (body || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (firstLine) {
+    return firstLine.length > 60 ? `${firstLine.slice(0, 60).trimEnd()}…` : firstLine;
+  }
+  let maxN = 0;
+  for (const title of existingTitles) {
+    const m = /^Видео №(\d+)$/.exec(title);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  return `Видео №${maxN + 1}`;
+}
+
+function formatPlayerTime(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+}
+
+// One shared loader for the YouTube IFrame API script/callback, since more
+// than one VideoPlayerScreen could mount over a session — window.YT is a
+// global singleton regardless of how many players exist.
+let ytApiPromise = null;
+function loadYouTubeIframeAPI() {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (ytApiPromise) return ytApiPromise;
+  ytApiPromise = new Promise((resolve) => {
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (prevReady) prevReady();
+      resolve(window.YT);
+    };
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+  });
+  return ytApiPromise;
+}
+
+function useVideos() {
+  const [videos, setVideos] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("videos-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setVideos(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setVideos(next);
+    try {
+      await window.storage.set("videos-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  // Returns false (and leaves state untouched) when the URL doesn't parse
+  // to a video id, so the form screen can show an inline error instead of
+  // silently saving a broken record.
+  const addVideo = useCallback(
+    (url, body) => {
+      const youtubeId = extractYouTubeId(url);
+      if (!youtubeId || !body.trim()) return false;
+      const title = deriveVideoTitle(body, videos.map((v) => v.title));
+      persist([...videos, { id: uid(), title, youtubeId, body: body.trim() }]);
+      return true;
+    },
+    [videos, persist]
+  );
+
+  const updateVideo = useCallback(
+    (id, url, body) => {
+      const youtubeId = extractYouTubeId(url);
+      if (!youtubeId || !body.trim()) return false;
+      const title = deriveVideoTitle(body, videos.filter((v) => v.id !== id).map((v) => v.title));
+      persist(videos.map((v) => (v.id === id ? { ...v, youtubeId, title, body: body.trim() } : v)));
+      return true;
+    },
+    [videos, persist]
+  );
+
+  const deleteVideo = useCallback(
+    (id) => {
+      persist(videos.filter((v) => v.id !== id));
+    },
+    [videos, persist]
+  );
+
+  return { videos, addVideo, updateVideo, deleteVideo };
+}
+
+function VideoFormScreen({ initial, onCancel, onSave }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [url, setUrl] = useState(initial ? `https://youtu.be/${initial.youtubeId}` : "");
+  const [body, setBody] = useState(initial?.body || "");
+  const [error, setError] = useState(false);
+
+  const fieldStyle = {
+    background: PALETTE.card,
+    color: PALETTE.ink,
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    fontSize: "0.95rem",
+    border: `1px solid ${PALETTE.cardEdge}`,
+  };
+
+  const handleSave = () => {
+    if (onSave(url, body) === false) setError(true);
+  };
+
+  return (
+    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8">
+        <button onClick={onCancel} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> {t("Отмена")}
+        </button>
+      </div>
+      <div className="px-6 pt-4 pb-8 max-w-md mx-auto w-full flex flex-col gap-3">
+        <input
+          autoFocus
+          value={url}
+          onChange={(e) => {
+            setUrl(e.target.value);
+            setError(false);
+          }}
+          placeholder={t("Ссылка на YouTube-видео")}
+          className="rounded-xl px-3 py-2 outline-none"
+          style={fieldStyle}
+        />
+        {error && (
+          <p className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+            {t("Не удалось распознать ссылку на YouTube-видео")}
+          </p>
+        )}
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder={t("Вставь текст или субтитры к видео")}
+          rows={14}
+          className="rounded-xl p-4 outline-none resize-none"
+          style={fieldStyle}
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={!url.trim() || !body.trim()}
+            className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
+            style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            {t("Сохранить")}
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 rounded-full py-2.5 text-sm"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            {t("Отмена")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const VIDEO_MIN_SPLIT = 0;
+const VIDEO_MAX_SPLIT = 0.72;
+const VIDEO_DEFAULT_SPLIT = 0.4;
+const VIDEO_AUDIO_THRESHOLD = 0.14;
+// Keeps the iframe rendered at a real (if tiny) pixel size even fully
+// "collapsed" to audio mode, so playback never stalls — the audio-mode
+// overlay covers it regardless of this floor, at its own comfortable height.
+const VIDEO_MIN_LIVE_PX = 36;
+const AUDIO_PANEL_HEIGHT_PX = 128;
+const SCROLL_BASE_PX_PER_SEC = 22;
+
+function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const regionRef = useRef(null);
+  const hostRef = useRef(null);
+  const playerRef = useRef(null);
+  const textPanelRef = useRef(null);
+  const dragRef = useRef({ startY: 0, startSplit: VIDEO_DEFAULT_SPLIT, regionHeight: 0 });
+  const manualScrollUntil = useRef(0);
+  const rafRef = useRef(null);
+
+  const [split, setSplit] = useState(VIDEO_DEFAULT_SPLIT);
+  const [dragging, setDragging] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState(1);
+
+  const isAudioMode = split < VIDEO_AUDIO_THRESHOLD;
+
+  // Mount the YouTube player once per video, tear it down on unmount/video change.
+  useEffect(() => {
+    let cancelled = false;
+    let player = null;
+    setPlayerReady(false);
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    loadYouTubeIframeAPI().then((YT) => {
+      if (cancelled || !YT || !hostRef.current) return;
+      player = new YT.Player(hostRef.current, {
+        videoId: video.youtubeId,
+        playerVars: { playsinline: 1, rel: 0 },
+        events: {
+          onReady: () => {
+            setPlayerReady(true);
+            setDuration(player.getDuration() || 0);
+          },
+          onStateChange: (e) => {
+            setPlaying(e.data === YT.PlayerState.PLAYING);
+            if (e.data === YT.PlayerState.PLAYING) setDuration(player.getDuration() || 0);
+          },
+        },
+      });
+      playerRef.current = player;
+    });
+    return () => {
+      cancelled = true;
+      if (player && player.destroy) player.destroy();
+      playerRef.current = null;
+    };
+  }, [video.id, video.youtubeId]);
+
+  // Keep the iframe's actual pixel size in sync with the video area, even
+  // while it's visually covered by the audio-mode overlay.
+  useEffect(() => {
+    if (!playerRef.current || !playerRef.current.setSize || !regionRef.current) return;
+    const w = regionRef.current.clientWidth;
+    const h = Math.max(split * (regionRef.current.clientHeight || 0), VIDEO_MIN_LIVE_PX);
+    playerRef.current.setSize(w, h);
+  }, [split, playerReady]);
+
+  // Poll playback position while playing (the IFrame API has no time-update event).
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => {
+      if (playerRef.current && playerRef.current.getCurrentTime) {
+        setCurrentTime(playerRef.current.getCurrentTime());
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, [playing]);
+
+  // Auto-scroll the subtitle panel while the video plays, at the chosen
+  // speed; a recent manual scroll (touch/wheel) suspends it briefly so the
+  // two don't fight each other.
+  useEffect(() => {
+    if (!playing) return;
+    let last = performance.now();
+    const tick = (now) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const el = textPanelRef.current;
+      if (el && performance.now() > manualScrollUntil.current) {
+        el.scrollTop += SCROLL_BASE_PX_PER_SEC * speed * dt;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => rafRef.current && cancelAnimationFrame(rafRef.current);
+  }, [playing, speed]);
+
+  const suspendAutoScroll = () => {
+    manualScrollUntil.current = performance.now() + 2500;
+  };
+
+  const startDrag = (e) => {
+    e.preventDefault();
+    const region = regionRef.current;
+    if (!region) return;
+    dragRef.current = { startY: e.clientY, startSplit: split, regionHeight: region.clientHeight || 1 };
+    setDragging(true);
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => {
+      const { startY, startSplit, regionHeight } = dragRef.current;
+      const delta = (e.clientY - startY) / regionHeight;
+      setSplit(Math.min(VIDEO_MAX_SPLIT, Math.max(VIDEO_MIN_SPLIT, startSplit + delta)));
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging]);
+
+  const togglePlay = () => {
+    if (!playerRef.current) return;
+    if (playing) playerRef.current.pauseVideo();
+    else playerRef.current.playVideo();
+  };
+
+  const seekToFraction = (fraction) => {
+    if (!playerRef.current || !duration) return;
+    playerRef.current.seekTo(duration * fraction, true);
+    setCurrentTime(duration * fraction);
+  };
+
+  const adjustSpeed = (delta) => {
+    setSpeed((s) => Math.min(3, Math.max(0.25, Math.round((s + delta) * 100) / 100)));
+  };
+
+  return (
+    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> {t("Home")}
+        </button>
+        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {video.title}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+
+      <div ref={regionRef} className="flex-1 min-h-0 flex flex-col max-w-md mx-auto w-full px-6 pb-4">
+        <div
+          className="relative rounded-2xl overflow-hidden shrink-0"
+          style={{
+            height: isAudioMode ? `${AUDIO_PANEL_HEIGHT_PX}px` : `${split * 100}%`,
+            background: PALETTE.chip,
+          }}
+        >
+          {/* This wrapper — not hostRef itself — carries the absolute
+              positioning: the YouTube API replaces hostRef's div with an
+              iframe in place, which does not inherit its class list, so
+              position/size have to live on a div that survives the swap. */}
+          <div className="absolute inset-0">
+            <div ref={hostRef} />
+          </div>
+          {isAudioMode && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6" style={{ background: PALETTE.chip }}>
+              <button
+                onClick={togglePlay}
+                disabled={!playerReady}
+                className="rounded-full flex items-center justify-center disabled:opacity-40"
+                style={{
+                  width: "52px",
+                  height: "52px",
+                  background: PALETTE.mustard,
+                  color: PALETTE.bgDeep,
+                  boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
+                }}
+              >
+                {playing ? <Pause size={22} /> : <Play size={22} style={{ marginLeft: "2px" }} />}
+              </button>
+              <div className="w-full flex items-center gap-2">
+                <span className="text-xs shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+                  {formatPlayerTime(currentTime)}
+                </span>
+                <div
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    seekToFraction(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)));
+                  }}
+                  className="flex-1 rounded-full cursor-pointer"
+                  style={{ height: "6px", background: PALETTE.bg, boxShadow: `inset 2px 2px 4px ${PALETTE.shadowDark}, inset -2px -2px 4px ${PALETTE.shadowLight}` }}
+                >
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: PALETTE.mustard }}
+                  />
+                </div>
+                <span className="text-xs shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+                  {formatPlayerTime(duration)}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div
+          onPointerDown={startDrag}
+          className="w-full flex items-center justify-center shrink-0"
+          style={{ height: "26px", touchAction: "none", cursor: "row-resize" }}
+          aria-label={t("Перетащить границу видео/текста")}
+        >
+          <div className="rounded-full" style={{ width: "40px", height: "4px", background: PALETTE.cardEdge }} />
+        </div>
+
+        <div className="flex-1 min-h-0 flex gap-2">
+          <div
+            ref={textPanelRef}
+            onPointerDown={suspendAutoScroll}
+            onWheel={suspendAutoScroll}
+            className="flex-1 min-h-0 overflow-y-auto rounded-2xl p-4"
+            style={{
+              background: PALETTE.card,
+              border: `1px solid ${PALETTE.cardEdge}`,
+              boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+            }}
+          >
+            <p
+              className="whitespace-pre-wrap"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "0.95rem", lineHeight: 1.8 }}
+            >
+              {video.body}
+            </p>
+          </div>
+
+          <div className="w-12 shrink-0 flex flex-col items-center justify-center gap-2">
+            <button
+              onClick={() => adjustSpeed(0.25)}
+              aria-label={t("Увеличить скорость прокрутки")}
+              className="rounded-full flex items-center justify-center"
+              style={{
+                width: "36px",
+                height: "36px",
+                background: PALETTE.chip,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+              }}
+            >
+              <ChevronUp size={16} />
+            </button>
+            <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+              ×{speed}
+            </span>
+            <button
+              onClick={() => adjustSpeed(-0.25)}
+              aria-label={t("Уменьшить скорость прокрутки")}
+              className="rounded-full flex items-center justify-center"
+              style={{
+                width: "36px",
+                height: "36px",
+                background: PALETTE.chip,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+              }}
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // SPECS — a fast scratch notebook: no title screen, no confirmations, just
 // tap "+" and start typing. The first line of the body becomes the title
 // automatically; a numbered fallback covers a blank/titleless entry.
@@ -3414,6 +3908,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "words", label: t("Слово"), Icon: BookMarked },
     { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
     { key: "specs", label: t("Спецификации"), Icon: NotebookPen },
+    { key: "videos", label: t("Видео"), Icon: Video },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -3442,6 +3937,7 @@ export default function App() {
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
+  const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -3452,6 +3948,9 @@ export default function App() {
   const [wordCreating, setWordCreating] = useState(false);
   const [wordEditingId, setWordEditingId] = useState(null);
   const [openSpecId, setOpenSpecId] = useState(null);
+  const [openVideoId, setOpenVideoId] = useState(null);
+  const [videoCreating, setVideoCreating] = useState(false);
+  const [videoEditingId, setVideoEditingId] = useState(null);
   const [isDark, setIsDark] = useState(false);
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
   const [reversed, setReversedRaw] = useState(false);
@@ -3462,7 +3961,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs"].includes(res.value)) setMode(res.value);
+        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos"].includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -3542,6 +4041,8 @@ export default function App() {
   const openWord = words.find((w) => w.id === openWordId) || null;
   const editingWord = words.find((w) => w.id === wordEditingId) || null;
   const openSpec = specs.find((s) => s.id === openSpecId) || null;
+  const openVideo = videos.find((v) => v.id === openVideoId) || null;
+  const editingVideo = videos.find((v) => v.id === videoEditingId) || null;
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -3617,6 +4118,24 @@ export default function App() {
           />
         ) : mode === "specs" && openSpec ? (
           <SpecViewScreen spec={openSpec} onBack={() => setOpenSpecId(null)} />
+        ) : mode === "videos" && openVideo ? (
+          <VideoPlayerScreen video={openVideo} onBack={() => setOpenVideoId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
+        ) : mode === "videos" && (videoCreating || editingVideo) ? (
+          <VideoFormScreen
+            initial={editingVideo}
+            onCancel={() => {
+              setVideoCreating(false);
+              setVideoEditingId(null);
+            }}
+            onSave={(url, body) => {
+              const ok = editingVideo ? updateVideo(editingVideo.id, url, body) : addVideo(url, body);
+              if (ok) {
+                setVideoCreating(false);
+                setVideoEditingId(null);
+              }
+              return ok;
+            }}
+          />
         ) : (
           <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
             <div className="text-center mb-2">
@@ -3634,6 +4153,8 @@ export default function App() {
                   ? "Vocabulary"
                   : mode === "specs"
                   ? t("Спецификации")
+                  : mode === "videos"
+                  ? t("Твои видео")
                   : t("Твои тексты")}
               </h1>
             </div>
@@ -3668,6 +4189,17 @@ export default function App() {
                 onOpen={setOpenSpecId}
                 onDeleteSelected={deleteSpecs}
                 onSaveNew={(body) => addSpec(deriveSpecTitle(body, specs.map((s) => s.title)), body)}
+              />
+            ) : mode === "videos" ? (
+              <PagesList
+                texts={videos}
+                onOpen={setOpenVideoId}
+                onCreate={() => setVideoCreating(true)}
+                onEdit={setVideoEditingId}
+                onDelete={deleteVideo}
+                emptyText={t("Видео пока нет. Добавь первое по ссылке.")}
+                createLabel={t("Добавить видео")}
+                rowIcon={Video}
               />
             ) : (
               <PagesList
