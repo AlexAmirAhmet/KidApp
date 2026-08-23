@@ -3358,7 +3358,7 @@ const VIDEO_AUDIO_THRESHOLD = 0.14;
 // "collapsed" to audio mode, so playback never stalls — the audio-mode
 // overlay covers it regardless of this floor, at its own comfortable height.
 const VIDEO_MIN_LIVE_PX = 36;
-const AUDIO_PANEL_HEIGHT_PX = 76;
+const AUDIO_PANEL_HEIGHT_PX = 60;
 const VIDEO_SCROLL_SPEED_MIN = 0;
 const VIDEO_SCROLL_SPEED_MAX = 25;
 const VIDEO_SCROLL_SPEED_STEP = 1;
@@ -3599,7 +3599,11 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 
   return (
     <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
-      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+      {/* Compact mode should have no wasted air: the header itself shrinks
+          its own top/bottom padding once the video collapses, instead of
+          keeping the same generous spacing that only makes sense when the
+          video is actually visible below it. */}
+      <div className={`max-w-md mx-auto w-full px-6 flex items-center justify-between shrink-0 ${isAudioMode ? "pt-3 pb-1" : "pt-8 pb-2"}`}>
         <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
           <ArrowLeft size={16} /> {t("Home")}
         </button>
@@ -3764,7 +3768,7 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
               onPointerDown={suspendAutoScroll}
               onWheel={suspendAutoScroll}
               className="absolute inset-0 overflow-y-auto pt-1 pb-2"
-              style={{ paddingLeft: "42px", paddingRight: "26px", zIndex: 1 }}
+              style={{ paddingLeft: "26px", paddingRight: "14px", zIndex: 1 }}
             >
               <p
                 className="whitespace-pre-wrap"
@@ -3781,155 +3785,145 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
               </p>
             </div>
 
-            {/* A thin, faint dashed line fixed at the vertical center of
-                the text area — the text scrolls through it, it never
+            {/* A thin, very faint dashed line fixed at the vertical center
+                of the text area — the text scrolls through it, it never
                 moves — with a live percentage of how far the scroll has
                 gotten at the LEFT edge and a small triangle pointer at the
-                RIGHT edge. Both sit in the side margins the text panel's
-                own padding just carved out above, so neither ever touches
-                a line of (now full-width-justified) text. The whole
-                overlay renders BEHIND the text panel (lower z-index) so
-                glyphs paint over the line wherever they cross it instead
-                of the line cutting across the glyphs — it reads as a
-                background guide the text passes over, not as an
-                underline-like decoration on top of it. It's a sibling of
-                the scrollable panel, positioned against this shared
-                "relative" parent so it stays put regardless of scroll
-                position; pointer-events: none lets taps pass straight
-                through to the text/selection above it. */}
+                RIGHT edge. Both are small thin labels (not buttons) that
+                live entirely inside the narrow side margins the text
+                panel's own padding carves out above — never touching a
+                line of (now full-width-justified) text and never needing
+                those margins widened to fit. The whole overlay renders
+                BEHIND the text panel (lower z-index) so glyphs paint over
+                the line wherever they cross it instead of the line
+                cutting across the glyphs — it reads as a background guide
+                the text passes over, not as an underline-like decoration
+                on top of it. It's a sibling of the scrollable panel,
+                positioned against this shared "relative" parent so it
+                stays put regardless of scroll position; pointer-events:
+                none lets taps pass straight through to the
+                text/selection above it. */}
             <div className="absolute left-0 right-0 pointer-events-none flex items-center gap-1 px-1" style={{ top: "50%", transform: "translateY(-50%)", zIndex: 0 }}>
               <span
                 ref={percentLabelRef}
-                className="text-xs font-medium shrink-0"
+                className="text-[9px] font-medium shrink-0"
                 style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, userSelect: "none" }}
               >
                 0%
               </span>
-              <div className="flex-1" style={{ borderTop: `1px dashed ${PALETTE.mustard}`, opacity: 0.35 }} />
+              <div className="flex-1" style={{ borderTop: `1px dashed ${PALETTE.mustard}`, opacity: 0.2 }} />
               <div
                 style={{
                   width: 0,
                   height: 0,
-                  borderTop: "4px solid transparent",
-                  borderBottom: "4px solid transparent",
-                  borderLeft: `6px solid ${PALETTE.mustard}`,
-                  opacity: 0.8,
+                  borderTop: "3px solid transparent",
+                  borderBottom: "3px solid transparent",
+                  borderLeft: `5px solid ${PALETTE.mustard}`,
+                  opacity: 0.7,
                   flexShrink: 0,
                 }}
               />
             </div>
           </div>
 
-          {/* Bottom control row: 5 equal sections — font size (-/+), text
-              auto-scroll play/stop, scroll speed (-/+) — floating directly
-              over the text with no shared backdrop; each button keeps its
-              own individual raised circle. A second, label-only row below
-              reuses the same 5-column grid with col-span-2 on the outer
-              pairs so each value sits exactly centered between its own
-              pair of buttons, not off to one side. */}
-          <div className="shrink-0">
-            <div className="grid grid-cols-5">
-              <div className="flex items-center justify-center py-2">
-                <button
-                  onClick={() => adjustFontLevel(-VIDEO_FONT_LEVEL_STEP)}
-                  aria-label={t("Уменьшить размер шрифта")}
-                  className="rounded-full flex items-center justify-center"
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    background: PALETTE.card,
-                    color: PALETTE.ink,
-                    boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
-                    userSelect: "none",
-                  }}
-                >
-                  <span style={{ fontSize: "0.7rem", fontWeight: 500 }}>A</span>
-                </button>
-              </div>
-              <div className="flex items-center justify-center py-2">
-                <button
-                  onClick={() => adjustFontLevel(VIDEO_FONT_LEVEL_STEP)}
-                  aria-label={t("Увеличить размер шрифта")}
-                  className="rounded-full flex items-center justify-center"
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    background: PALETTE.card,
-                    color: PALETTE.ink,
-                    boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
-                    userSelect: "none",
-                  }}
-                >
-                  <span style={{ fontSize: "1.2rem", fontWeight: 500 }}>A</span>
-                </button>
-              </div>
-              <div className="flex items-center justify-center py-2">
-                <button
-                  onClick={toggleScrollPlaying}
-                  aria-label={scrollPlaying ? t("Остановить прокрутку текста") : t("Запустить прокрутку текста")}
-                  className="rounded-full flex items-center justify-center"
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    background: PALETTE.mustard,
-                    color: PALETTE.bgDeep,
-                    boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
-                    userSelect: "none",
-                  }}
-                >
-                  {scrollPlaying ? <Pause size={17} strokeWidth={1.75} /> : <Play size={17} strokeWidth={1.75} style={{ marginLeft: "2px" }} />}
-                </button>
-              </div>
-              <div className="flex items-center justify-center py-2">
-                <button
-                  onClick={() => adjustSpeed(-VIDEO_SCROLL_SPEED_STEP)}
-                  aria-label={t("Уменьшить скорость прокрутки")}
-                  className="rounded-full flex items-center justify-center"
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    background: PALETTE.card,
-                    color: PALETTE.ink,
-                    boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
-                    userSelect: "none",
-                  }}
-                >
-                  <Minus size={17} strokeWidth={1.5} />
-                </button>
-              </div>
-              <div className="flex items-center justify-center py-2">
-                <button
-                  onClick={() => adjustSpeed(VIDEO_SCROLL_SPEED_STEP)}
-                  aria-label={t("Увеличить скорость прокрутки")}
-                  className="rounded-full flex items-center justify-center"
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    background: PALETTE.card,
-                    color: PALETTE.ink,
-                    boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
-                    userSelect: "none",
-                  }}
-                >
-                  <Plus size={17} strokeWidth={1.5} />
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-5">
-              <span
-                className="col-span-2 text-[10px] leading-none text-center"
-                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
-              >
-                A{fontLevel}
-              </span>
-              <span />
-              <span
-                className="col-span-2 text-[10px] leading-none text-center"
-                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
-              >
-                ×{speed}
-              </span>
-            </div>
+          {/* Bottom control row: font size (-/+), text auto-scroll
+              play/stop, scroll speed (-/+) — a single row, floating
+              directly over the text with no shared backdrop; each button
+              keeps its own individual raised circle. The current value for
+              each pair sits inline between its own two buttons (not a
+              separate row underneath, which only cost extra height) — the
+              two buttons flanking play/stop butt right up against it with
+              no gap, and the flex-1 label slots either side absorb
+              whatever width that frees up, growing or shrinking with the
+              screen instead of a fixed offset. */}
+          <div className="w-full flex items-center gap-1 py-2 shrink-0">
+            <button
+              onClick={() => adjustFontLevel(-VIDEO_FONT_LEVEL_STEP)}
+              aria-label={t("Уменьшить размер шрифта")}
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                userSelect: "none",
+              }}
+            >
+              <span style={{ fontSize: "0.7rem", fontWeight: 500 }}>A</span>
+            </button>
+            <span
+              className="flex-1 text-center text-[10px] leading-none"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
+            >
+              A{fontLevel}
+            </span>
+            <button
+              onClick={() => adjustFontLevel(VIDEO_FONT_LEVEL_STEP)}
+              aria-label={t("Увеличить размер шрифта")}
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                userSelect: "none",
+              }}
+            >
+              <span style={{ fontSize: "1.2rem", fontWeight: 500 }}>A</span>
+            </button>
+            <button
+              onClick={toggleScrollPlaying}
+              aria-label={scrollPlaying ? t("Остановить прокрутку текста") : t("Запустить прокрутку текста")}
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.mustard,
+                color: PALETTE.bgDeep,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                userSelect: "none",
+              }}
+            >
+              {scrollPlaying ? <Pause size={17} strokeWidth={1.75} /> : <Play size={17} strokeWidth={1.75} style={{ marginLeft: "2px" }} />}
+            </button>
+            <button
+              onClick={() => adjustSpeed(-VIDEO_SCROLL_SPEED_STEP)}
+              aria-label={t("Уменьшить скорость прокрутки")}
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                userSelect: "none",
+              }}
+            >
+              <Minus size={17} strokeWidth={1.5} />
+            </button>
+            <span
+              className="flex-1 text-center text-[10px] leading-none"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
+            >
+              ×{speed}
+            </span>
+            <button
+              onClick={() => adjustSpeed(VIDEO_SCROLL_SPEED_STEP)}
+              aria-label={t("Увеличить скорость прокрутки")}
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                userSelect: "none",
+              }}
+            >
+              <Plus size={17} strokeWidth={1.5} />
+            </button>
           </div>
         </div>
       </div>
