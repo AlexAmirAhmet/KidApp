@@ -3358,17 +3358,26 @@ const VIDEO_AUDIO_THRESHOLD = 0.14;
 // "collapsed" to audio mode, so playback never stalls — the audio-mode
 // overlay covers it regardless of this floor, at its own comfortable height.
 const VIDEO_MIN_LIVE_PX = 36;
-const AUDIO_PANEL_HEIGHT_PX = 100;
+const AUDIO_PANEL_HEIGHT_PX = 76;
 const VIDEO_SCROLL_SPEED_MIN = 0;
 const VIDEO_SCROLL_SPEED_MAX = 25;
 const VIDEO_SCROLL_SPEED_STEP = 1;
 const VIDEO_SCROLL_SPEED_DEFAULT = 5;
 // px/sec of auto-scroll per unit of the 1-25 speed scale.
 const SCROLL_PX_PER_SEC_PER_SPEED = 4.4;
-const VIDEO_FONT_SIZE_MIN = 0.7;
-const VIDEO_FONT_SIZE_MAX = 2.2;
-const VIDEO_FONT_SIZE_STEP = 0.1;
-const VIDEO_FONT_SIZE_DEFAULT = 0.95;
+// Font size is chosen on a plain integer 1-15 scale (same whole-step feel
+// as the speed scale) and mapped onto a practical rem range: small enough
+// to be useful on a tablet at level 1, large enough for low-vision users
+// at level 15.
+const VIDEO_FONT_LEVEL_MIN = 1;
+const VIDEO_FONT_LEVEL_MAX = 15;
+const VIDEO_FONT_LEVEL_STEP = 1;
+const VIDEO_FONT_LEVEL_DEFAULT = 4;
+const VIDEO_FONT_REM_MIN = 0.7;
+const VIDEO_FONT_REM_MAX = 2.2;
+function fontLevelToRem(level) {
+  return VIDEO_FONT_REM_MIN + ((level - VIDEO_FONT_LEVEL_MIN) * (VIDEO_FONT_REM_MAX - VIDEO_FONT_REM_MIN)) / (VIDEO_FONT_LEVEL_MAX - VIDEO_FONT_LEVEL_MIN);
+}
 const SEEK_STEP_SECONDS = 10;
 const DOUBLE_TAP_MS = 350;
 
@@ -3394,7 +3403,7 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(VIDEO_SCROLL_SPEED_DEFAULT);
-  const [fontSize, setFontSize] = useState(VIDEO_FONT_SIZE_DEFAULT);
+  const [fontLevel, setFontLevel] = useState(VIDEO_FONT_LEVEL_DEFAULT);
   const [scrollPlaying, setScrollPlaying] = useState(true);
   // { side: "left" | "right", seconds: number } | null
   const [seekFlash, setSeekFlash] = useState(null);
@@ -3551,10 +3560,8 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
     setSpeed((s) => Math.min(VIDEO_SCROLL_SPEED_MAX, Math.max(VIDEO_SCROLL_SPEED_MIN, Math.round(s + delta))));
   };
 
-  const adjustFontSize = (delta) => {
-    setFontSize((s) =>
-      Math.min(VIDEO_FONT_SIZE_MAX, Math.max(VIDEO_FONT_SIZE_MIN, Math.round((s + delta) * 100) / 100))
-    );
+  const adjustFontLevel = (delta) => {
+    setFontLevel((l) => Math.min(VIDEO_FONT_LEVEL_MAX, Math.max(VIDEO_FONT_LEVEL_MIN, Math.round(l + delta))));
   };
 
   const restartFromBeginning = () => {
@@ -3710,39 +3717,61 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
         {/* The draggable video/text divider doubles as the video's own
             progress bar — a tap here was never used for seeking, so
             merging the two loses nothing and buys back vertical space
-            that a separate handle + separate progress row used to cost. */}
+            that a separate handle + separate progress row used to cost.
+            A small dot cluster below (not on) the bar hints that this
+            whole strip — bar, percent, and dots alike — is draggable. */}
         <div
           onPointerDown={startDrag}
-          className="w-full flex items-center gap-2 shrink-0"
-          style={{ height: "30px", touchAction: "none", cursor: "row-resize", userSelect: "none", WebkitUserSelect: "none" }}
+          className="w-full shrink-0 flex flex-col items-center"
+          style={{
+            paddingTop: "6px",
+            paddingBottom: "5px",
+            touchAction: "none",
+            cursor: "row-resize",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+          }}
           aria-label={t("Перетащить границу видео/текста (полоска — прогресс видео)")}
         >
-          <div
-            className="flex-1 rounded-full"
-            style={{ height: "6px", background: PALETTE.bg, boxShadow: `inset 2px 2px 4px ${PALETTE.shadowDark}, inset -2px -2px 4px ${PALETTE.shadowLight}` }}
-          >
+          <div className="w-full flex items-center gap-2">
             <div
-              className="h-full rounded-full"
-              style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: PALETTE.mustard }}
-            />
+              className="flex-1 rounded-full"
+              style={{ height: "6px", background: PALETTE.bg, boxShadow: `inset 2px 2px 4px ${PALETTE.shadowDark}, inset -2px -2px 4px ${PALETTE.shadowLight}` }}
+            >
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: PALETTE.mustard }}
+              />
+            </div>
+            <span
+              className="text-[10px] shrink-0"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, minWidth: "24px", textAlign: "right" }}
+            >
+              {duration ? Math.round((currentTime / duration) * 100) : 0}%
+            </span>
           </div>
-          <span
-            className="text-[10px] shrink-0"
-            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, minWidth: "24px", textAlign: "right" }}
-          >
-            {duration ? Math.round((currentTime / duration) * 100) : 0}%
-          </span>
+          <div className="flex items-center gap-1" style={{ marginTop: "5px" }}>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="rounded-full" style={{ width: "3px", height: "3px", background: PALETTE.cardEdge }} />
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 flex flex-col gap-2">
           <div className="relative flex-1 min-h-0">
-            <div ref={textPanelRef} onPointerDown={suspendAutoScroll} onWheel={suspendAutoScroll} className="absolute inset-0 overflow-y-auto py-2">
+            <div
+              ref={textPanelRef}
+              onPointerDown={suspendAutoScroll}
+              onWheel={suspendAutoScroll}
+              className="absolute inset-0 overflow-y-auto pt-1 pb-2"
+              style={{ paddingLeft: "42px", paddingRight: "26px", zIndex: 1 }}
+            >
               <p
                 className="whitespace-pre-wrap"
                 style={{
                   fontFamily: "'IBM Plex Sans', sans-serif",
                   color: PALETTE.ink,
-                  fontSize: `${fontSize}rem`,
+                  fontSize: `${fontLevelToRem(fontLevel)}rem`,
                   lineHeight: 1.8,
                   textAlign: "justify",
                   textJustify: "inter-word",
@@ -3752,41 +3781,42 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
               </p>
             </div>
 
-            {/* A thin line fixed at the vertical center of the text area —
-                the text scrolls through it, it never moves — with a live
-                percentage of how far the scroll has gotten at the LEFT
-                edge and a small triangle pointer at the RIGHT edge, so a
-                user who looks away can find their place again at a
-                glance. Both sit at the outer edges rather than in the
-                middle of the line so they don't sit on top of running
-                (now full-width-justified) text; that's also why they can
-                afford to read a bit more prominently than a subtle divider
-                normally would. It's a sibling of the scrollable panel (not
-                inside it), positioned against this shared "relative"
-                parent, so it stays put regardless of scroll position;
-                pointer-events: none lets taps pass straight through to the
-                text/selection below. */}
-            <div className="absolute left-0 right-0 pointer-events-none" style={{ top: "50%", transform: "translateY(-50%)" }}>
-              <div className="flex items-center gap-2 px-1">
-                <span
-                  ref={percentLabelRef}
-                  className="text-xs font-medium shrink-0"
-                  style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, userSelect: "none" }}
-                >
-                  0%
-                </span>
-                <div className="flex-1" style={{ height: "1px", background: PALETTE.mustard, opacity: 0.5 }} />
-                <div
-                  style={{
-                    width: 0,
-                    height: 0,
-                    borderTop: "4px solid transparent",
-                    borderBottom: "4px solid transparent",
-                    borderLeft: `6px solid ${PALETTE.mustard}`,
-                    flexShrink: 0,
-                  }}
-                />
-              </div>
+            {/* A thin, faint dashed line fixed at the vertical center of
+                the text area — the text scrolls through it, it never
+                moves — with a live percentage of how far the scroll has
+                gotten at the LEFT edge and a small triangle pointer at the
+                RIGHT edge. Both sit in the side margins the text panel's
+                own padding just carved out above, so neither ever touches
+                a line of (now full-width-justified) text. The whole
+                overlay renders BEHIND the text panel (lower z-index) so
+                glyphs paint over the line wherever they cross it instead
+                of the line cutting across the glyphs — it reads as a
+                background guide the text passes over, not as an
+                underline-like decoration on top of it. It's a sibling of
+                the scrollable panel, positioned against this shared
+                "relative" parent so it stays put regardless of scroll
+                position; pointer-events: none lets taps pass straight
+                through to the text/selection above it. */}
+            <div className="absolute left-0 right-0 pointer-events-none flex items-center gap-1 px-1" style={{ top: "50%", transform: "translateY(-50%)", zIndex: 0 }}>
+              <span
+                ref={percentLabelRef}
+                className="text-xs font-medium shrink-0"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mustard, userSelect: "none" }}
+              >
+                0%
+              </span>
+              <div className="flex-1" style={{ borderTop: `1px dashed ${PALETTE.mustard}`, opacity: 0.35 }} />
+              <div
+                style={{
+                  width: 0,
+                  height: 0,
+                  borderTop: "4px solid transparent",
+                  borderBottom: "4px solid transparent",
+                  borderLeft: `6px solid ${PALETTE.mustard}`,
+                  opacity: 0.8,
+                  flexShrink: 0,
+                }}
+              />
             </div>
           </div>
 
@@ -3801,7 +3831,7 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
             <div className="grid grid-cols-5">
               <div className="flex items-center justify-center py-2">
                 <button
-                  onClick={() => adjustFontSize(-VIDEO_FONT_SIZE_STEP)}
+                  onClick={() => adjustFontLevel(-VIDEO_FONT_LEVEL_STEP)}
                   aria-label={t("Уменьшить размер шрифта")}
                   className="rounded-full flex items-center justify-center"
                   style={{
@@ -3818,7 +3848,7 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
               </div>
               <div className="flex items-center justify-center py-2">
                 <button
-                  onClick={() => adjustFontSize(VIDEO_FONT_SIZE_STEP)}
+                  onClick={() => adjustFontLevel(VIDEO_FONT_LEVEL_STEP)}
                   aria-label={t("Увеличить размер шрифта")}
                   className="rounded-full flex items-center justify-center"
                   style={{
@@ -3890,7 +3920,7 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
                 className="col-span-2 text-[10px] leading-none text-center"
                 style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, userSelect: "none" }}
               >
-                {Math.round((fontSize / VIDEO_FONT_SIZE_DEFAULT) * 100)}%
+                A{fontLevel}
               </span>
               <span />
               <span
