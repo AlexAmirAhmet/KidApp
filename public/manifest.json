@@ -1,35 +1,35 @@
 {
-  "name": "English Cards",
-  "short_name": "EN Cards",
-  "description": "Офлайн-карточки для изучения английских слов и фраз",
-  "start_url": "/",
-  "scope": "/",
+  "name": "Focus",
+  "short_name": "Focus",
+  "description": "Карточки, тексты, словарь и видео с субтитрами для изучения английского",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#E6EDEE",
-  "theme_color": "#E6EDEE",
+  "background_color": "#E8ECF1",
+  "theme_color": "#E8ECF1",
   "lang": "ru",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
