@@ -367,6 +367,9 @@ const STRINGS = {
   },
   "Добавить дочерний элемент": { en: "Add a child item" },
   "Назад": { en: "Back" },
+  "Удалить атом": { en: "Delete atom" },
+  "Увеличить масштаб": { en: "Zoom in" },
+  "Уменьшить масштаб": { en: "Zoom out" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -4011,6 +4014,12 @@ function updateAtomInForest(nodes, id, updater) {
   });
 }
 
+function removeAtomNode(nodes, id) {
+  return nodes
+    .filter((n) => n.id !== id)
+    .map((n) => (n.children && n.children.length ? { ...n, children: removeAtomNode(n.children, id) } : n));
+}
+
 // Walks a chain of ids from `root` (one atom tree's top node) down to the
 // current center, returning [root, ..., center]. Stops early (falling back
 // to whatever prefix still resolves) if a link no longer exists — e.g. the
@@ -4063,13 +4072,6 @@ function useAtomTabs() {
     return node.id;
   }, [tabs, persist]);
 
-  const deleteTab = useCallback(
-    (id) => {
-      persist(tabs.filter((t) => t.id !== id));
-    },
-    [tabs, persist]
-  );
-
   const updateNode = useCallback(
     (tabId, nodeId, updater) => {
       persist(tabs.map((t) => (t.id === tabId ? updateAtomInForest([t], nodeId, updater)[0] : t)));
@@ -4077,7 +4079,20 @@ function useAtomTabs() {
     [tabs, persist]
   );
 
-  return { tabs, addTab, deleteTab, updateNode };
+  // Deleting a tab's own root node removes the whole tab; deleting any
+  // deeper node just prunes it out of its parent's children.
+  const deleteNode = useCallback(
+    (tabId, nodeId) => {
+      if (tabId === nodeId) {
+        persist(tabs.filter((t) => t.id !== tabId));
+        return;
+      }
+      persist(tabs.map((t) => (t.id === tabId ? { ...t, children: removeAtomNode(t.children || [], nodeId) } : t)));
+    },
+    [tabs, persist]
+  );
+
+  return { tabs, addTab, updateNode, deleteNode };
 }
 
 // A round field for capturing a thought two ways: speak it (Web Speech
@@ -4278,10 +4293,11 @@ function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
 // a large bottom zone — a free-form stream of thoughts that only ever
 // grows by appending, never by overwriting, since capturing a raw idea
 // shouldn't force the user to word it carefully in the moment.
-function AtomCardScreen({ node, depth, onBack, onSave, isDark, onToggleTheme }) {
+function AtomCardScreen({ node, depth, onBack, onSave, onDelete, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
   const t = useT();
   const [voiceField, setVoiceField] = useState(null); // "title" | "description" | "thoughts" | null
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleVoiceSave = (value) => {
     if (voiceField === "title") {
@@ -4303,7 +4319,34 @@ function AtomCardScreen({ node, depth, onBack, onSave, isDark, onToggleTheme }) 
         <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
           {node.title || t("Без названия")}
         </h2>
-        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+        <div className="flex items-center gap-2 shrink-0">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  onDelete();
+                  setConfirmDelete(false);
+                }}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Да")}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Отмена")}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} aria-label={t("Удалить атом")} className="p-1" style={{ color: PALETTE.fadeText }}>
+              <Trash2 size={15} />
+            </button>
+          )}
+          <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+        </div>
       </div>
 
       {/* Compact top zone — as short as the collapsed audio-mode panel in
@@ -4379,6 +4422,13 @@ const ATOM_RING_RADIUS = 118;
 // An expanded (tap-1) electron moves out to this radius while at full
 // center-sized diameter, so it doesn't overlap the real center.
 const ATOM_EXPANDED_RADIUS = 168;
+// The whole composition (center + ring) auto-fits to this fraction of the
+// container width by default; the user can then pinch or use +/- to go
+// anywhere within [MIN, MAX] freely from that starting point.
+const ATOM_FILL_RATIO = 0.92;
+const ATOM_MIN_SCALE = 0.6;
+const ATOM_MAX_SCALE = 2.4;
+const ATOM_SCALE_STEP = 0.15;
 
 // The orbital ("Atom") view for one node in the tree: a center circle plus
 // up to 9 electrons around it (or a single "+" past depth 2), a drag-to-
@@ -4386,25 +4436,59 @@ const ATOM_EXPANDED_RADIUS = 168;
 // Manages its own `path` (ids from the tab's root down to the current
 // center) — this one component handles every depth, recursing only in the
 // sense that entering a child just pushes onto `path` and re-renders.
-function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
+function AtomsScreen({ tab, onBack, onUpdateNode, onDeleteNode, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
   const t = useT();
   const [path, setPath] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [cardMode, setCardMode] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [manualScale, setManualScale] = useState(null);
+  const [fitScale, setFitScale] = useState(1);
+  const [containerWidth, setContainerWidth] = useState(0);
   const ringRef = useRef(null);
   const dragRef = useRef({ cx: 0, cy: 0, startAngle: 0, startRotation: 0 });
   const [dragging, setDragging] = useState(false);
+  const pointersRef = useRef(new Map());
+  const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
   const chain = resolveAtomChain(tab, path);
   const center = chain[chain.length - 1];
   const depth = chain.length - 1;
+  const scale = manualScale ?? fitScale;
+
+  const showAutoRing = depth <= ATOM_AUTO_MAX_DEPTH && (center.children || []).length > 0;
+  const showManualRing = depth > ATOM_AUTO_MAX_DEPTH;
+  const ringItems = showAutoRing ? center.children : showManualRing ? [...(center.children || []), { id: "__add__", isAdd: true }] : [];
+
+  // Auto-fit the whole composition (center + ring) to the container width by
+  // default, so it reaches almost edge-to-edge instead of leaving empty
+  // space above/below; the user's own pinch/button zoom overrides this.
+  // Re-runs on `cardMode` too: the ring container unmounts while Card mode
+  // is showing (a separate lifecycle from ringItems.length changing), so
+  // without it a re-fit on return to the ring view would never fire.
+  useEffect(() => {
+    const el = ringRef.current;
+    if (!el) return;
+    const compute = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      setContainerWidth(width);
+      const targetDiameter = ringItems.length > 0 ? 2 * ATOM_RING_RADIUS + ATOM_ELECTRON_SIZE : ATOM_CENTER_SIZE;
+      const next = Math.min(ATOM_MAX_SCALE, Math.max(1, (width * ATOM_FILL_RATIO) / targetDiameter));
+      setFitScale(next);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ringItems.length, cardMode]);
 
   const resetLocalNav = () => {
     setExpandedId(null);
     setCardMode(false);
     setRotation(0);
+    setManualScale(null);
   };
 
   const handleBack = () => {
@@ -4452,41 +4536,106 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
     setCardMode(true);
   };
 
-  const startRotateDrag = (e) => {
-    const rect = ringRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
-    dragRef.current = { cx, cy, startAngle, startRotation: rotation };
+  // Deletes the currently centered atom. At depth 0 that's the tab's own
+  // root, so the whole tab goes away and we bounce out to the dashboard;
+  // any deeper node is just pruned from its parent, and we step back up to
+  // that parent's orbit view (the deleted node can no longer be "center").
+  const handleDeleteNode = () => {
+    onDeleteNode(tab.id, center.id);
+    if (depth === 0) {
+      onBack();
+    } else {
+      setPath((p) => p.slice(0, -1));
+      resetLocalNav();
+    }
+  };
+
+  // Unified pointer handling: a single pointer rotates the ring (as
+  // before); a second pointer touching down switches to pinch-to-zoom,
+  // scaling the whole composition (center + ring) together. Tracking is
+  // done via window-level listeners (not pointer capture) so a tap that
+  // lands on a button inside the ring — center, an electron, the "+" tile
+  // — still gets its normal click; capturing the pointer on the container
+  // would swallow that click instead.
+  const handlePointerDown = (e) => {
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size === 2) {
+      const [p1, p2] = [...pointersRef.current.values()];
+      pinchRef.current = { active: true, startDist: Math.hypot(p1.x - p2.x, p1.y - p2.y), startScale: scale };
+    } else if (pointersRef.current.size === 1 && ringItems.length > 0) {
+      const rect = ringRef.current?.getBoundingClientRect();
+      if (rect) {
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+        dragRef.current = { cx, cy, startAngle, startRotation: rotation };
+      }
+    }
     setDragging(true);
+  };
+
+  const zoomBy = (delta) => {
+    setManualScale(Math.min(ATOM_MAX_SCALE, Math.max(ATOM_MIN_SCALE, scale + delta)));
   };
 
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e) => {
-      const { cx, cy, startAngle, startRotation } = dragRef.current;
-      const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
-      setRotation(startRotation + (angle - startAngle));
+      if (!pointersRef.current.has(e.pointerId)) return;
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchRef.current.active && pointersRef.current.size === 2) {
+        const [p1, p2] = [...pointersRef.current.values()];
+        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        if (pinchRef.current.startDist > 0) {
+          const next = Math.min(ATOM_MAX_SCALE, Math.max(ATOM_MIN_SCALE, pinchRef.current.startScale * (dist / pinchRef.current.startDist)));
+          setManualScale(next);
+        }
+      } else if (!pinchRef.current.active && pointersRef.current.size === 1) {
+        const { cx, cy, startAngle, startRotation } = dragRef.current;
+        const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+        setRotation(startRotation + (angle - startAngle));
+      }
     };
-    const onUp = () => setDragging(false);
+    const onUp = (e) => {
+      pointersRef.current.delete(e.pointerId);
+      if (pointersRef.current.size < 2) pinchRef.current.active = false;
+      if (pointersRef.current.size === 0) setDragging(false);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [dragging]);
 
   if (cardMode) {
     return (
-      <AtomCardScreen node={center} depth={depth} onBack={handleBack} onSave={handleCardSave} isDark={isDark} onToggleTheme={onToggleTheme} />
+      <AtomCardScreen
+        node={center}
+        depth={depth}
+        onBack={handleBack}
+        onSave={handleCardSave}
+        onDelete={handleDeleteNode}
+        isDark={isDark}
+        onToggleTheme={onToggleTheme}
+      />
     );
   }
 
-  const showAutoRing = depth <= ATOM_AUTO_MAX_DEPTH && (center.children || []).length > 0;
-  const showManualRing = depth > ATOM_AUTO_MAX_DEPTH;
-  const ringItems = showAutoRing ? center.children : showManualRing ? [...(center.children || []), { id: "__add__", isAdd: true }] : [];
+  const centerSize = ATOM_CENTER_SIZE * scale;
+  const electronSize = ATOM_ELECTRON_SIZE * scale;
+  const ringRadius = ATOM_RING_RADIUS * scale;
+  // At the default auto-fit scale the resting ring already reaches near
+  // the container's edges, so growing an expanded electron by the full
+  // (unclamped) expanded radius could push it half off-screen — making
+  // the second tap impossible to land. Clamp it to whatever room the
+  // container actually has for the electron's full (center-sized) width.
+  const availableHalfWidth = containerWidth > 0 ? containerWidth / 2 - 8 : (ATOM_EXPANDED_RADIUS + ATOM_CENTER_SIZE / 2) * scale;
+  const maxExpandedRadius = Math.max(0, availableHalfWidth - centerSize / 2);
+  const expandedRadius = Math.min(ATOM_EXPANDED_RADIUS * scale, maxExpandedRadius);
 
   return (
     <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
@@ -4508,15 +4657,15 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
       <div
         ref={ringRef}
         className="flex-1 relative"
-        onPointerDown={ringItems.length > 0 ? startRotateDrag : undefined}
+        onPointerDown={handlePointerDown}
         style={{ touchAction: "none" }}
       >
         <button
           onClick={() => setCardMode(true)}
           className="absolute rounded-full flex items-center justify-center px-3"
           style={{
-            width: `${ATOM_CENTER_SIZE}px`,
-            height: `${ATOM_CENTER_SIZE}px`,
+            width: `${centerSize}px`,
+            height: `${centerSize}px`,
             top: "50%",
             left: "50%",
             transform: "translate(-50%, -50%)",
@@ -4543,11 +4692,11 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
                 aria-label={t("Добавить дочерний элемент")}
                 className="absolute rounded-full flex items-center justify-center"
                 style={{
-                  width: `${ATOM_ELECTRON_SIZE}px`,
-                  height: `${ATOM_ELECTRON_SIZE}px`,
+                  width: `${electronSize}px`,
+                  height: `${electronSize}px`,
                   top: "50%",
                   left: "50%",
-                  transform: `translate(-50%, -50%) translate(${ATOM_RING_RADIUS * Math.cos(rad)}px, ${ATOM_RING_RADIUS * Math.sin(rad)}px)`,
+                  transform: `translate(-50%, -50%) translate(${ringRadius * Math.cos(rad)}px, ${ringRadius * Math.sin(rad)}px)`,
                   background: PALETTE.chip,
                   color: PALETTE.mustard,
                   border: `1px dashed ${PALETTE.cardEdge}`,
@@ -4560,8 +4709,8 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
           }
 
           const isExpanded = expandedId === item.id;
-          const radius = isExpanded ? ATOM_EXPANDED_RADIUS : ATOM_RING_RADIUS;
-          const size = isExpanded ? ATOM_CENTER_SIZE : ATOM_ELECTRON_SIZE;
+          const radius = isExpanded ? expandedRadius : ringRadius;
+          const size = isExpanded ? centerSize : electronSize;
           const x = radius * Math.cos(rad);
           const y = radius * Math.sin(rad);
 
@@ -4592,6 +4741,25 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
             </button>
           );
         })}
+
+        <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-20" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => zoomBy(ATOM_SCALE_STEP)}
+            aria-label={t("Увеличить масштаб")}
+            className="rounded-full flex items-center justify-center"
+            style={{ width: "36px", height: "36px", background: PALETTE.chip, color: PALETTE.ink, boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}` }}
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            onClick={() => zoomBy(-ATOM_SCALE_STEP)}
+            aria-label={t("Уменьшить масштаб")}
+            className="rounded-full flex items-center justify-center"
+            style={{ width: "36px", height: "36px", background: PALETTE.chip, color: PALETTE.ink, boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}` }}
+          >
+            <Minus size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -4601,10 +4769,9 @@ function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
 // FocusDashboard's tile style. Creating one skips any name prompt — it
 // opens straight into a single blank central card, per the spec's own
 // "appears empty, named later by tapping in" flow.
-function AtomsDashboard({ tabs, onOpen, onCreate, onDelete }) {
+function AtomsDashboard({ tabs, onOpen, onCreate }) {
   const PALETTE = useTheme();
   const t = useT();
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   if (tabs.length === 0) {
     return (
@@ -4629,56 +4796,29 @@ function AtomsDashboard({ tabs, onOpen, onCreate, onDelete }) {
   return (
     <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
       {tabs.map((tab) => (
-        <div key={tab.id} className="relative">
-          <button
-            onClick={() => onOpen(tab.id)}
-            className="relative w-full rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
+        <button
+          key={tab.id}
+          onClick={() => onOpen(tab.id)}
+          className="relative w-full rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
+          style={{
+            height: "182px",
+            background: PALETTE.card,
+            boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+            border: `1px solid ${PALETTE.cardEdge}`,
+          }}
+        >
+          <span
+            className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
             style={{
-              height: "182px",
               background: PALETTE.card,
-              boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+              boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
               border: `1px solid ${PALETTE.cardEdge}`,
             }}
           >
-            <span
-              className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
-              style={{
-                background: PALETTE.card,
-                boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
-                border: `1px solid ${PALETTE.cardEdge}`,
-              }}
-            >
-              <Atom size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
-            </span>
-            <TileName>{tab.title || t("Без названия")}</TileName>
-          </button>
-
-          {confirmDeleteId === tab.id ? (
-            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
-              <button
-                onClick={() => {
-                  onDelete(tab.id);
-                  setConfirmDeleteId(null);
-                }}
-                className="text-xs px-2 py-1 rounded-full"
-                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
-              >
-                {t("Да")}
-              </button>
-              <button
-                onClick={() => setConfirmDeleteId(null)}
-                className="text-xs px-2 py-1 rounded-full"
-                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
-              >
-                {t("Отмена")}
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmDeleteId(tab.id)} title={t("Удалить")} className="absolute top-2 right-2 p-1" style={{ color: PALETTE.fadeText }}>
-              <Trash2 size={14} />
-            </button>
-          )}
-        </div>
+            <Atom size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
+          </span>
+          <TileName>{tab.title || t("Без названия")}</TileName>
+        </button>
       ))}
 
       <button
@@ -5008,7 +5148,7 @@ export default function App() {
   const vocab = useVocabulary();
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
-  const { tabs: atomTabs, addTab: addAtomTab, deleteTab: deleteAtomTab, updateNode: updateAtomNode } = useAtomTabs();
+  const { tabs: atomTabs, addTab: addAtomTab, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomTabs();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -5214,6 +5354,7 @@ export default function App() {
             tab={openAtomTab}
             onBack={() => setOpenAtomTabId(null)}
             onUpdateNode={updateAtomNode}
+            onDeleteNode={deleteAtomNode}
             isDark={isDark}
             onToggleTheme={toggleTheme}
           />
@@ -5292,7 +5433,6 @@ export default function App() {
                   const id = addAtomTab();
                   setOpenAtomTabId(id);
                 }}
-                onDelete={deleteAtomTab}
               />
             ) : (
               <PagesList
