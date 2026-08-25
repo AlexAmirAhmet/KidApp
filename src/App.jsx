@@ -34,6 +34,9 @@ import {
   Play,
   Pause,
   Minus,
+  Atom,
+  Mic,
+  Keyboard,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -61,7 +64,11 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 
-const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`;
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@keyframes atomPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}`;
 
 // Neumorphic surfaces: page, cards, and chips all share one base tone per
 // theme — shape reads through soft dual-offset shadows (a light source
@@ -334,6 +341,32 @@ const STRINGS = {
   },
   "Остановить прокрутку текста": { en: "Stop text auto-scroll" },
   "Запустить прокрутку текста": { en: "Start text auto-scroll" },
+
+  "Атомы": { en: "Atoms" },
+  "Твои атомы": { en: "Your atoms" },
+  "Атомов пока нет. Создай первый — это начнётся с одной пустой карточки.": {
+    en: "No atoms yet. Create the first one — it starts as a single empty card.",
+  },
+  "Новый атом": { en: "New atom" },
+  "Без названия": { en: "Untitled" },
+  "Нет описания": { en: "No description" },
+  "Поток мыслей пуст": { en: "No thoughts yet" },
+  "Название": { en: "Title" },
+  "Описание": { en: "Description" },
+  "Новая мысль": { en: "New thought" },
+  "Редактировать название": { en: "Edit title" },
+  "Редактировать описание": { en: "Edit description" },
+  "Добавить мысль": { en: "Add a thought" },
+  "Добавить": { en: "Add" },
+  "Микрофон": { en: "Microphone" },
+  "Клавиатура": { en: "Keyboard" },
+  "Говори — я слушаю…": { en: "Speak — I'm listening…" },
+  "Остановить запись": { en: "Stop recording" },
+  "Голосовой ввод не поддерживается этим браузером": {
+    en: "Voice input isn't supported by this browser",
+  },
+  "Добавить дочерний элемент": { en: "Add a child item" },
+  "Назад": { en: "Back" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -3949,6 +3982,720 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// ATOMS — an orbital take on breaking a goal down: one node ("atom") per
+// idea, shown either as a compact orbit (a center with up to 9 small
+// "electrons" circling it) or, one tap in, as a full-screen card with a
+// title/description pair and a free-form stream of thoughts. Every root is
+// its own independent tree ("tab"), stored flat as an array under
+// "atoms-v1" — the same load/persist skeleton as every other store in this
+// file (see useGoals/useTextDocs/useVideos).
+//
+// Unlike the Focus/goals tree (which distinguishes "category" vs "atom"
+// nodes), every Atoms node has the exact same shape and can always grow
+// children — there's no type to track, just depth-based behavior: a node
+// at depth 0 or 1 (i.e. functioning as "level 1" or "level 2") gets its 9
+// children auto-generated the moment it's given a title; a node at depth 2
+// or deeper never auto-populates and instead offers a single "+" tile to
+// add children one at a time, without limit.
+// ════════════════════════════════════════════════════════════════════════
+
+function makeEmptyAtomNode() {
+  return { id: uid(), title: "", description: "", thoughts: "", children: [] };
+}
+
+function updateAtomInForest(nodes, id, updater) {
+  return nodes.map((n) => {
+    if (n.id === id) return updater(n);
+    if (n.children && n.children.length) return { ...n, children: updateAtomInForest(n.children, id, updater) };
+    return n;
+  });
+}
+
+// Walks a chain of ids from `root` (one atom tree's top node) down to the
+// current center, returning [root, ..., center]. Stops early (falling back
+// to whatever prefix still resolves) if a link no longer exists — e.g. the
+// tree changed shape underneath an in-flight navigation.
+function resolveAtomChain(root, path) {
+  const chain = [root];
+  let node = root;
+  for (const id of path) {
+    const next = (node.children || []).find((c) => c.id === id);
+    if (!next) break;
+    chain.push(next);
+    node = next;
+  }
+  return chain;
+}
+
+function useAtomTabs() {
+  const [tabs, setTabs] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("atoms-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setTabs(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setTabs(next);
+    try {
+      await window.storage.set("atoms-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const addTab = useCallback(() => {
+    const node = makeEmptyAtomNode();
+    persist([...tabs, node]);
+    return node.id;
+  }, [tabs, persist]);
+
+  const deleteTab = useCallback(
+    (id) => {
+      persist(tabs.filter((t) => t.id !== id));
+    },
+    [tabs, persist]
+  );
+
+  const updateNode = useCallback(
+    (tabId, nodeId, updater) => {
+      persist(tabs.map((t) => (t.id === tabId ? updateAtomInForest([t], nodeId, updater)[0] : t)));
+    },
+    [tabs, persist]
+  );
+
+  return { tabs, addTab, deleteTab, updateNode };
+}
+
+// A round field for capturing a thought two ways: speak it (Web Speech
+// API, live interim transcript) or type it — both funnel into the same
+// editable draft before saving, since speech recognition isn't always
+// accurate and deserves a review step rather than committing blind.
+function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [lang] = useLanguage();
+  const [phase, setPhase] = useState("choice"); // "choice" | "listening" | "edit"
+  const [text, setText] = useState(initialText);
+  const recognitionRef = useRef(null);
+  const speechSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.stop();
+      } catch (e) {
+        // already stopped
+      }
+    };
+  }, []);
+
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setPhase("edit");
+      return;
+    }
+    const rec = new SR();
+    rec.lang = lang === "en" ? "en-US" : "ru-RU";
+    rec.interimResults = true;
+    rec.continuous = true;
+    let finalText = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += chunk + " ";
+        else interim += chunk;
+      }
+      setText((finalText + interim).trim());
+    };
+    rec.onerror = () => setPhase("edit");
+    rec.onend = () => setPhase((p) => (p === "listening" ? "edit" : p));
+    recognitionRef.current = rec;
+    setText("");
+    setPhase("listening");
+    try {
+      rec.start();
+    } catch (e) {
+      setPhase("edit");
+    }
+  };
+
+  const stopListening = () => {
+    try {
+      recognitionRef.current?.stop();
+    } catch (e) {
+      // already stopped
+    }
+    setPhase("edit");
+  };
+
+  return (
+    <div
+      className="fixed inset-0 flex items-center justify-center px-6"
+      style={{ background: "rgba(0,0,0,0.45)", zIndex: 60 }}
+      onClick={onCancel}
+    >
+      <div className="flex flex-col items-center gap-5" onClick={(e) => e.stopPropagation()}>
+        {title && (
+          <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#fff", fontSize: "0.9rem" }}>{title}</p>
+        )}
+
+        {phase === "choice" && (
+          <div
+            className="flex overflow-hidden"
+            style={{
+              width: "220px",
+              height: "220px",
+              borderRadius: "50%",
+              boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}`,
+              border: `1px solid ${PALETTE.cardEdge}`,
+            }}
+          >
+            <button
+              onClick={startListening}
+              disabled={!speechSupported}
+              className="flex-1 flex flex-col items-center justify-center gap-2 disabled:opacity-40"
+              style={{ background: PALETTE.chip, borderRight: `1px solid ${PALETTE.cardEdge}` }}
+            >
+              <Mic size={30} style={{ color: PALETTE.mustard }} />
+              <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem", color: PALETTE.fadeText }}>
+                {t("Микрофон")}
+              </span>
+            </button>
+            <button
+              onClick={() => setPhase("edit")}
+              className="flex-1 flex flex-col items-center justify-center gap-2"
+              style={{ background: PALETTE.chip }}
+            >
+              <Keyboard size={30} style={{ color: PALETTE.mustard }} />
+              <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem", color: PALETTE.fadeText }}>
+                {t("Клавиатура")}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {phase === "listening" && (
+          <>
+            <button
+              onClick={stopListening}
+              aria-label={t("Остановить запись")}
+              className="flex flex-col items-center justify-center gap-2"
+              style={{
+                width: "220px",
+                height: "220px",
+                borderRadius: "50%",
+                background: PALETTE.chip,
+                boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}`,
+                border: `1px solid ${PALETTE.danger}`,
+                animation: "atomPulse 1.4s ease-in-out infinite",
+              }}
+            >
+              <Mic size={34} style={{ color: PALETTE.danger }} />
+              <span
+                className="text-center px-6"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.fadeText }}
+              >
+                {t("Говори — я слушаю…")}
+              </span>
+            </button>
+            {text && (
+              <p className="max-w-xs text-center" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#fff", fontSize: "0.85rem" }}>
+                {text}
+              </p>
+            )}
+          </>
+        )}
+
+        {phase === "edit" && (
+          <div className="w-full max-w-xs flex flex-col gap-3">
+            {!speechSupported && (
+              <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.waiting, fontSize: "0.7rem", textAlign: "center" }}>
+                {t("Голосовой ввод не поддерживается этим браузером")}
+              </p>
+            )}
+            <textarea
+              autoFocus
+              rows={5}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              className="w-full rounded-2xl p-4 outline-none"
+              style={{
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                border: `1px solid ${PALETTE.cardEdge}`,
+                boxShadow: `inset 2px 2px 5px ${PALETTE.shadowDark}, inset -2px -2px 5px ${PALETTE.shadowLight}`,
+              }}
+            />
+            <div className="flex items-center gap-3 justify-center">
+              <button
+                onClick={onCancel}
+                className="px-5 py-2 rounded-full"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.fadeText }}
+              >
+                {t("Отмена")}
+              </button>
+              <button
+                onClick={() => text.trim() && onSave(text.trim())}
+                disabled={!text.trim()}
+                className="px-5 py-2 rounded-full disabled:opacity-40"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
+              >
+                {t("Сохранить")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "choice" && (
+          <button onClick={onCancel} style={{ color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.8rem" }}>
+            {t("Отмена")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Full-screen "Card" mode for one atom: a compact top zone (short title +
+// longer description, each independently editable via its own pencil) and
+// a large bottom zone — a free-form stream of thoughts that only ever
+// grows by appending, never by overwriting, since capturing a raw idea
+// shouldn't force the user to word it carefully in the moment.
+function AtomCardScreen({ node, depth, onBack, onSave, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [voiceField, setVoiceField] = useState(null); // "title" | "description" | "thoughts" | null
+
+  const handleVoiceSave = (value) => {
+    if (voiceField === "title") {
+      onSave({ title: value });
+    } else if (voiceField === "description") {
+      onSave({ description: value });
+    } else if (voiceField === "thoughts") {
+      onSave({ thoughts: node.thoughts ? `${node.thoughts}\n\n${value}` : value });
+    }
+    setVoiceField(null);
+  };
+
+  return (
+    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+        <button onClick={onBack} aria-label={t("Назад")} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} />
+        </button>
+        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {node.title || t("Без названия")}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+
+      {/* Compact top zone — as short as the collapsed audio-mode panel in
+          Видео — holding the short title and the longer description. */}
+      <div className="max-w-md mx-auto w-full px-6 pb-3 shrink-0" style={{ borderBottom: `1px solid ${PALETTE.cardEdge}` }}>
+        <div className="flex items-center justify-between gap-3 py-2">
+          <p className="truncate flex-1" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.1rem" }}>
+            {node.title || t("Без названия")}
+          </p>
+          <button
+            onClick={() => setVoiceField("title")}
+            aria-label={t("Редактировать название")}
+            className="rounded-full flex items-center justify-center shrink-0"
+            style={{ width: "30px", height: "30px", background: PALETTE.chip, color: PALETTE.ink, boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}` }}
+          >
+            <Pencil size={13} />
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-3 py-2">
+          <p className="line-clamp-2 flex-1" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
+            {node.description || t("Нет описания")}
+          </p>
+          <button
+            onClick={() => setVoiceField("description")}
+            aria-label={t("Редактировать описание")}
+            className="rounded-full flex items-center justify-center shrink-0"
+            style={{ width: "30px", height: "30px", background: PALETTE.chip, color: PALETTE.ink, boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}` }}
+          >
+            <Pencil size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom zone — the raw stream of thoughts, plus its own "+" that
+          always appends here, never into the title/description above. */}
+      <div className="flex-1 min-h-0 overflow-y-auto max-w-md mx-auto w-full px-6 py-4">
+        <p className="whitespace-pre-wrap" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "0.95rem", lineHeight: 1.8 }}>
+          {node.thoughts || t("Поток мыслей пуст")}
+        </p>
+      </div>
+
+      <div className="max-w-md mx-auto w-full px-6 pb-8 flex justify-center shrink-0">
+        <button
+          onClick={() => setVoiceField("thoughts")}
+          aria-label={t("Добавить мысль")}
+          className="rounded-full flex items-center justify-center"
+          style={{ width: "52px", height: "52px", background: PALETTE.mustard, color: PALETTE.bgDeep, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}` }}
+        >
+          <Plus size={22} />
+        </button>
+      </div>
+
+      {voiceField && (
+        <VoiceOrKeyboardInput
+          title={voiceField === "title" ? t("Название") : voiceField === "description" ? t("Описание") : t("Добавить мысль")}
+          initialText={voiceField === "thoughts" ? "" : node[voiceField]}
+          onSave={handleVoiceSave}
+          onCancel={() => setVoiceField(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const ATOM_CHILD_COUNT = 9;
+// Depths 0 and 1 (a tree's root, and the root's own children) auto-populate
+// their 9 electrons as soon as they're named. Depth 2 and beyond never
+// auto-populates — see the section banner above for why.
+const ATOM_AUTO_MAX_DEPTH = 1;
+const ATOM_CENTER_SIZE = 128;
+const ATOM_ELECTRON_SIZE = 46;
+const ATOM_RING_RADIUS = 118;
+// An expanded (tap-1) electron moves out to this radius while at full
+// center-sized diameter, so it doesn't overlap the real center.
+const ATOM_EXPANDED_RADIUS = 168;
+
+// The orbital ("Atom") view for one node in the tree: a center circle plus
+// up to 9 electrons around it (or a single "+" past depth 2), a drag-to-
+// rotate ring, and the two-tap enlarge-then-enter navigation gesture.
+// Manages its own `path` (ids from the tab's root down to the current
+// center) — this one component handles every depth, recursing only in the
+// sense that entering a child just pushes onto `path` and re-renders.
+function AtomsScreen({ tab, onBack, onUpdateNode, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [path, setPath] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [cardMode, setCardMode] = useState(false);
+  const [rotation, setRotation] = useState(0);
+  const ringRef = useRef(null);
+  const dragRef = useRef({ cx: 0, cy: 0, startAngle: 0, startRotation: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  const chain = resolveAtomChain(tab, path);
+  const center = chain[chain.length - 1];
+  const depth = chain.length - 1;
+
+  const resetLocalNav = () => {
+    setExpandedId(null);
+    setCardMode(false);
+    setRotation(0);
+  };
+
+  const handleBack = () => {
+    if (cardMode) {
+      setCardMode(false);
+      return;
+    }
+    if (depth === 0) {
+      onBack();
+      return;
+    }
+    setPath((p) => p.slice(0, -1));
+    resetLocalNav();
+  };
+
+  const enter = (id) => {
+    setPath((p) => [...p, id]);
+    resetLocalNav();
+  };
+
+  const handleElectronTap = (electron) => {
+    if (expandedId === electron.id) {
+      enter(electron.id);
+    } else {
+      setExpandedId(electron.id);
+    }
+  };
+
+  const handleCardSave = (patch) => {
+    onUpdateNode(tab.id, center.id, (n) => {
+      const updated = { ...n, ...patch };
+      if ("title" in patch && depth <= ATOM_AUTO_MAX_DEPTH && updated.title.trim() && (n.children || []).length === 0) {
+        updated.children = Array.from({ length: ATOM_CHILD_COUNT }, () => makeEmptyAtomNode());
+      }
+      return updated;
+    });
+  };
+
+  const handleAddManualChild = () => {
+    const newNode = makeEmptyAtomNode();
+    onUpdateNode(tab.id, center.id, (n) => ({ ...n, children: [...(n.children || []), newNode] }));
+    setPath((p) => [...p, newNode.id]);
+    setExpandedId(null);
+    setRotation(0);
+    setCardMode(true);
+  };
+
+  const startRotateDrag = (e) => {
+    const rect = ringRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+    dragRef.current = { cx, cy, startAngle, startRotation: rotation };
+    setDragging(true);
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => {
+      const { cx, cy, startAngle, startRotation } = dragRef.current;
+      const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+      setRotation(startRotation + (angle - startAngle));
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging]);
+
+  if (cardMode) {
+    return (
+      <AtomCardScreen node={center} depth={depth} onBack={handleBack} onSave={handleCardSave} isDark={isDark} onToggleTheme={onToggleTheme} />
+    );
+  }
+
+  const showAutoRing = depth <= ATOM_AUTO_MAX_DEPTH && (center.children || []).length > 0;
+  const showManualRing = depth > ATOM_AUTO_MAX_DEPTH;
+  const ringItems = showAutoRing ? center.children : showManualRing ? [...(center.children || []), { id: "__add__", isAdd: true }] : [];
+
+  return (
+    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+        <button
+          onClick={handleBack}
+          aria-label={depth === 0 ? t("Home") : t("Назад")}
+          className="flex items-center gap-1 text-sm shrink-0"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+        >
+          <ArrowLeft size={16} /> {depth === 0 ? t("Home") : ""}
+        </button>
+        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {center.title || t("Без названия")}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+
+      <div
+        ref={ringRef}
+        className="flex-1 relative"
+        onPointerDown={ringItems.length > 0 ? startRotateDrag : undefined}
+        style={{ touchAction: "none" }}
+      >
+        <button
+          onClick={() => setCardMode(true)}
+          className="absolute rounded-full flex items-center justify-center px-3"
+          style={{
+            width: `${ATOM_CENTER_SIZE}px`,
+            height: `${ATOM_CENTER_SIZE}px`,
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: PALETTE.card,
+            color: PALETTE.ink,
+            border: `1px solid ${PALETTE.cardEdge}`,
+            boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+          }}
+        >
+          <span className="line-clamp-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: "1rem" }}>
+            {center.title || t("Без названия")}
+          </span>
+        </button>
+
+        {ringItems.map((item, i) => {
+          const angle = (360 / ringItems.length) * i + rotation;
+          const rad = (angle * Math.PI) / 180;
+
+          if (item.isAdd) {
+            return (
+              <button
+                key="__add__"
+                onClick={handleAddManualChild}
+                aria-label={t("Добавить дочерний элемент")}
+                className="absolute rounded-full flex items-center justify-center"
+                style={{
+                  width: `${ATOM_ELECTRON_SIZE}px`,
+                  height: `${ATOM_ELECTRON_SIZE}px`,
+                  top: "50%",
+                  left: "50%",
+                  transform: `translate(-50%, -50%) translate(${ATOM_RING_RADIUS * Math.cos(rad)}px, ${ATOM_RING_RADIUS * Math.sin(rad)}px)`,
+                  background: PALETTE.chip,
+                  color: PALETTE.mustard,
+                  border: `1px dashed ${PALETTE.cardEdge}`,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                }}
+              >
+                <Plus size={18} />
+              </button>
+            );
+          }
+
+          const isExpanded = expandedId === item.id;
+          const radius = isExpanded ? ATOM_EXPANDED_RADIUS : ATOM_RING_RADIUS;
+          const size = isExpanded ? ATOM_CENTER_SIZE : ATOM_ELECTRON_SIZE;
+          const x = radius * Math.cos(rad);
+          const y = radius * Math.sin(rad);
+
+          return (
+            <button
+              key={item.id}
+              onClick={() => handleElectronTap(item)}
+              className="absolute rounded-full flex items-center justify-center px-2"
+              style={{
+                width: `${size}px`,
+                height: `${size}px`,
+                top: "50%",
+                left: "50%",
+                transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                background: PALETTE.card,
+                color: PALETTE.ink,
+                border: `1px solid ${PALETTE.cardEdge}`,
+                boxShadow: `3px 3px 7px ${PALETTE.shadowDark}, -3px -3px 7px ${PALETTE.shadowLight}`,
+                transition: "width 0.2s, height 0.2s, transform 0.2s",
+                zIndex: isExpanded ? 5 : 1,
+              }}
+            >
+              {isExpanded && (
+                <span className="line-clamp-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: "0.85rem" }}>
+                  {item.title || t("Без названия")}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Top-level dashboard: a grid of independent atom trees ("tabs"), mirroring
+// FocusDashboard's tile style. Creating one skips any name prompt — it
+// opens straight into a single blank central card, per the spec's own
+// "appears empty, named later by tapping in" flow.
+function AtomsDashboard({ tabs, onOpen, onCreate, onDelete }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  if (tabs.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-16">
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
+          {t("Атомов пока нет. Создай первый — это начнётся с одной пустой карточки.")}
+        </p>
+        <button
+          onClick={onCreate}
+          className="flex flex-col items-center justify-center gap-3 w-full max-w-xs py-14 rounded-[28px]"
+          style={{ background: "transparent", border: `2px dashed ${PALETTE.cardEdge}` }}
+        >
+          <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+            <Plus size={24} style={{ color: PALETTE.mustard }} />
+          </span>
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.9rem", color: PALETTE.fadeText }}>{t("Новый атом")}</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
+      {tabs.map((tab) => (
+        <div key={tab.id} className="relative">
+          <button
+            onClick={() => onOpen(tab.id)}
+            className="relative w-full rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
+            style={{
+              height: "182px",
+              background: PALETTE.card,
+              boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+              border: `1px solid ${PALETTE.cardEdge}`,
+            }}
+          >
+            <span
+              className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
+              style={{
+                background: PALETTE.card,
+                boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+                border: `1px solid ${PALETTE.cardEdge}`,
+              }}
+            >
+              <Atom size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
+            </span>
+            <TileName>{tab.title || t("Без названия")}</TileName>
+          </button>
+
+          {confirmDeleteId === tab.id ? (
+            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
+              <button
+                onClick={() => {
+                  onDelete(tab.id);
+                  setConfirmDeleteId(null);
+                }}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Да")}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Отмена")}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDeleteId(tab.id)} title={t("Удалить")} className="absolute top-2 right-2 p-1" style={{ color: PALETTE.fadeText }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+
+      <button
+        onClick={onCreate}
+        className="rounded-[28px] flex flex-col items-center justify-center gap-3"
+        style={{ height: "182px", background: "transparent", border: `2px dashed ${PALETTE.cardEdge}` }}
+      >
+        <span className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+          <Plus size={24} style={{ color: PALETTE.mustard }} />
+        </span>
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.85rem", color: PALETTE.fadeText }}>{t("Новый атом")}</span>
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // SPECS — a fast scratch notebook: no title screen, no confirmations, just
 // tap "+" and start typing. The first line of the body becomes the title
 // automatically; a numbered fallback covers a blank/titleless entry.
@@ -4231,6 +4978,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
     { key: "specs", label: t("Спецификации"), Icon: NotebookPen },
     { key: "videos", label: t("Видео"), Icon: Video },
+    { key: "atoms", label: t("Атомы"), Icon: Atom },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -4260,6 +5008,7 @@ export default function App() {
   const vocab = useVocabulary();
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
+  const { tabs: atomTabs, addTab: addAtomTab, deleteTab: deleteAtomTab, updateNode: updateAtomNode } = useAtomTabs();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -4273,6 +5022,7 @@ export default function App() {
   const [openVideoId, setOpenVideoId] = useState(null);
   const [videoCreating, setVideoCreating] = useState(false);
   const [videoEditingId, setVideoEditingId] = useState(null);
+  const [openAtomTabId, setOpenAtomTabId] = useState(null);
   const [isDark, setIsDark] = useState(false);
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
   const [reversed, setReversedRaw] = useState(false);
@@ -4283,7 +5033,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos"].includes(res.value)) setMode(res.value);
+        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms"].includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -4365,6 +5115,7 @@ export default function App() {
   const openSpec = specs.find((s) => s.id === openSpecId) || null;
   const openVideo = videos.find((v) => v.id === openVideoId) || null;
   const editingVideo = videos.find((v) => v.id === videoEditingId) || null;
+  const openAtomTab = atomTabs.find((t) => t.id === openAtomTabId) || null;
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -4458,6 +5209,14 @@ export default function App() {
               return ok;
             }}
           />
+        ) : mode === "atoms" && openAtomTab ? (
+          <AtomsScreen
+            tab={openAtomTab}
+            onBack={() => setOpenAtomTabId(null)}
+            onUpdateNode={updateAtomNode}
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+          />
         ) : (
           <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: `radial-gradient(circle at 50% 0%, ${theme.bgGlow}, ${theme.bg})` }}>
             <div className="text-center mb-2">
@@ -4477,6 +5236,8 @@ export default function App() {
                   ? t("Спецификации")
                   : mode === "videos"
                   ? t("Твои видео")
+                  : mode === "atoms"
+                  ? t("Твои атомы")
                   : t("Твои тексты")}
               </h1>
             </div>
@@ -4522,6 +5283,16 @@ export default function App() {
                 emptyText={t("Видео пока нет. Добавь первое по ссылке.")}
                 createLabel={t("Добавить видео")}
                 rowIcon={Video}
+              />
+            ) : mode === "atoms" ? (
+              <AtomsDashboard
+                tabs={atomTabs}
+                onOpen={setOpenAtomTabId}
+                onCreate={() => {
+                  const id = addAtomTab();
+                  setOpenAtomTabId(id);
+                }}
+                onDelete={deleteAtomTab}
               />
             ) : (
               <PagesList
