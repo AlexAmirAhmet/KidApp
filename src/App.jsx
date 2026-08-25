@@ -365,7 +365,6 @@ const STRINGS = {
   "Голосовой ввод не поддерживается этим браузером": {
     en: "Voice input isn't supported by this browser",
   },
-  "Добавить дочерний элемент": { en: "Add a child item" },
   "Назад": { en: "Back" },
   "Удалить атом": { en: "Delete atom" },
   "Увеличить масштаб": { en: "Zoom in" },
@@ -4288,6 +4287,191 @@ function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
   );
 }
 
+// Opened from the manual "+" tile (level 3+, see its split mic/keyboard
+// halves below): captures a raw thought via mic or keyboard WITHOUT
+// creating any atom yet — a node only gets created on Save, and its text
+// always lands in the thought stream, never in title/description (naming
+// happens deliberately later, via the pencil, once the atom already
+// exists). `entry` ("mic" | "keyboard") is decided by which half of the
+// tile was tapped: "mic" auto-starts listening immediately with no extra
+// tap; "keyboard" opens straight into the keyboard, field already
+// focused. Deliberately separate from VoiceOrKeyboardInput above (which
+// stays untouched) since this flow's shape — always-visible Save/Cancel,
+// an inline mic/keyboard switch instead of an initial choice screen — is
+// meaningfully different, not just a reskin.
+function AtomCreateCapture({ entry, onSave, onCancel }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [lang] = useLanguage();
+  const [text, setText] = useState("");
+  const [recognizing, setRecognizing] = useState(false);
+  const [keyboardEngaged, setKeyboardEngaged] = useState(entry === "keyboard");
+  const recognitionRef = useRef(null);
+  const textareaRef = useRef(null);
+  const startedRef = useRef(false);
+  const speechSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setKeyboardEngaged(true);
+      return;
+    }
+    const rec = new SR();
+    rec.lang = lang === "en" ? "en-US" : "ru-RU";
+    rec.interimResults = true;
+    rec.continuous = true;
+    let finalText = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += chunk + " ";
+        else interim += chunk;
+      }
+      setText((finalText + interim).trim());
+    };
+    rec.onerror = () => setRecognizing(false);
+    rec.onend = () => setRecognizing(false);
+    recognitionRef.current = rec;
+    setRecognizing(true);
+    try {
+      rec.start();
+    } catch (e) {
+      setRecognizing(false);
+    }
+  };
+
+  const stopListening = () => {
+    try {
+      recognitionRef.current?.stop();
+    } catch (e) {
+      // already stopped
+    }
+    setRecognizing(false);
+  };
+
+  // Runs once on mount: auto-starts the mic for a "mic" entry (no extra
+  // tap needed) or jumps straight to the keyboard state otherwise.
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    if (entry === "mic" && speechSupported) {
+      startListening();
+    } else {
+      setKeyboardEngaged(true);
+    }
+    return () => {
+      try {
+        recognitionRef.current?.stop();
+      } catch (e) {
+        // already stopped
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Only an explicit switch to keyboard focuses the field — never on mount
+  // for a mic entry — so activating the mic never pops the OS keyboard.
+  useEffect(() => {
+    if (keyboardEngaged) textareaRef.current?.focus();
+  }, [keyboardEngaged]);
+
+  const engageKeyboard = () => {
+    stopListening();
+    setKeyboardEngaged(true);
+  };
+
+  const toggleMic = () => {
+    if (recognizing) stopListening();
+    else startListening();
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.45)", zIndex: 60 }} onClick={onCancel}>
+      <div className="w-full max-w-xs flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+        <textarea
+          ref={textareaRef}
+          rows={6}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="w-full rounded-2xl p-4 outline-none"
+          style={{
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            background: PALETTE.card,
+            color: PALETTE.ink,
+            border: `1px solid ${PALETTE.cardEdge}`,
+            boxShadow: `inset 2px 2px 5px ${PALETTE.shadowDark}, inset -2px -2px 5px ${PALETTE.shadowLight}`,
+          }}
+        />
+
+        {!keyboardEngaged && (
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={toggleMic}
+              aria-label={t("Микрофон")}
+              className="flex flex-col items-center justify-center gap-1 rounded-full shrink-0"
+              style={{
+                width: "84px",
+                height: "84px",
+                background: PALETTE.chip,
+                color: recognizing ? PALETTE.danger : PALETTE.mustard,
+                boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
+                border: `1px solid ${recognizing ? PALETTE.danger : PALETTE.cardEdge}`,
+                animation: recognizing ? "atomPulse 1.4s ease-in-out infinite" : "none",
+              }}
+            >
+              <Mic size={26} />
+              <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>
+                {t("Микрофон")}
+              </span>
+            </button>
+            <button
+              onClick={engageKeyboard}
+              aria-label={t("Клавиатура")}
+              className="flex items-center justify-center rounded-full shrink-0"
+              style={{
+                width: "44px",
+                height: "44px",
+                background: PALETTE.chip,
+                color: PALETTE.fadeText,
+                boxShadow: `2px 2px 5px ${PALETTE.shadowDark}, -2px -2px 5px ${PALETTE.shadowLight}`,
+                border: `1px solid ${PALETTE.cardEdge}`,
+                opacity: 0.75,
+              }}
+            >
+              <Keyboard size={16} />
+            </button>
+          </div>
+        )}
+        {!speechSupported && entry === "mic" && (
+          <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.waiting, fontSize: "0.7rem", textAlign: "center" }}>
+            {t("Голосовой ввод не поддерживается этим браузером")}
+          </p>
+        )}
+
+        <div className="flex items-center gap-3 justify-center">
+          <button
+            onClick={onCancel}
+            className="px-5 py-2 rounded-full"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.fadeText }}
+          >
+            {t("Отмена")}
+          </button>
+          <button
+            onClick={() => text.trim() && onSave(text.trim())}
+            disabled={!text.trim()}
+            className="px-5 py-2 rounded-full disabled:opacity-40"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
+          >
+            {t("Сохранить")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Full-screen "Card" mode for one atom: a compact top zone (short title +
 // longer description, each independently editable via its own pencil) and
 // a large bottom zone — a free-form stream of thoughts that only ever
@@ -4441,6 +4625,7 @@ function AtomsScreen({ tab, onBack, onUpdateNode, onDeleteNode, isDark, onToggle
   const t = useT();
   const [path, setPath] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
+  const [createEntry, setCreateEntry] = useState(null); // "mic" | "keyboard" | null
   const [cardMode, setCardMode] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [manualScale, setManualScale] = useState(null);
@@ -4527,12 +4712,17 @@ function AtomsScreen({ tab, onBack, onUpdateNode, onDeleteNode, isDark, onToggle
     });
   };
 
-  const handleAddManualChild = () => {
-    const newNode = makeEmptyAtomNode();
+  // Captured text always lands in the new node's thought stream, never in
+  // title/description — the node (still nameless) is only created now,
+  // once there's something to put in it, not the moment the tile is
+  // tapped.
+  const handleCreateSave = (thoughts) => {
+    const newNode = { ...makeEmptyAtomNode(), thoughts };
     onUpdateNode(tab.id, center.id, (n) => ({ ...n, children: [...(n.children || []), newNode] }));
     setPath((p) => [...p, newNode.id]);
     setExpandedId(null);
     setRotation(0);
+    setCreateEntry(null);
     setCardMode(true);
   };
 
@@ -4685,26 +4875,56 @@ function AtomsScreen({ tab, onBack, onUpdateNode, onDeleteNode, isDark, onToggle
           const rad = (angle * Math.PI) / 180;
 
           if (item.isAdd) {
+            // Split mic/keyboard tile, not a plain "+": tapping either
+            // half opens AtomCreateCapture below with that entry point —
+            // no atom is created here, only on that overlay's Save.
+            const iconSize = Math.max(12, Math.round(electronSize * 0.28));
             return (
-              <button
+              <div
                 key="__add__"
-                onClick={handleAddManualChild}
-                aria-label={t("Добавить дочерний элемент")}
-                className="absolute rounded-full flex items-center justify-center"
+                className="absolute rounded-full flex overflow-hidden"
                 style={{
                   width: `${electronSize}px`,
                   height: `${electronSize}px`,
                   top: "50%",
                   left: "50%",
                   transform: `translate(-50%, -50%) translate(${ringRadius * Math.cos(rad)}px, ${ringRadius * Math.sin(rad)}px)`,
-                  background: PALETTE.chip,
-                  color: PALETTE.mustard,
-                  border: `1px dashed ${PALETTE.cardEdge}`,
-                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}`,
+                  border: `1px solid ${PALETTE.cardEdge}`,
+                  boxShadow: `2px 2px 6px ${PALETTE.shadowDark}, -2px -2px 6px ${PALETTE.shadowLight}, 0 0 14px 3px ${PALETTE.shadowDark}`,
                 }}
               >
-                <Plus size={18} />
-              </button>
+                <button
+                  onClick={() => setCreateEntry("mic")}
+                  aria-label={t("Микрофон")}
+                  className="flex-1 flex items-center justify-center"
+                  style={{ background: PALETTE.chip, color: PALETTE.mustard, borderRight: `1px solid ${PALETTE.cardEdge}` }}
+                >
+                  <Mic size={iconSize} />
+                </button>
+                <button
+                  onClick={() => setCreateEntry("keyboard")}
+                  aria-label={t("Клавиатура")}
+                  className="flex-1 flex items-center justify-center"
+                  style={{ background: PALETTE.chip, color: PALETTE.mustard }}
+                >
+                  <Keyboard size={iconSize} />
+                </button>
+                <span
+                  className="absolute rounded-full flex items-center justify-center pointer-events-none"
+                  style={{
+                    width: "16px",
+                    height: "16px",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    background: PALETTE.card,
+                    boxShadow: `1px 1px 3px ${PALETTE.shadowDark}, -1px -1px 3px ${PALETTE.shadowLight}`,
+                    border: `1px solid ${PALETTE.cardEdge}`,
+                  }}
+                >
+                  <Plus size={10} style={{ color: PALETTE.mustard }} />
+                </span>
+              </div>
             );
           }
 
@@ -4761,6 +4981,10 @@ function AtomsScreen({ tab, onBack, onUpdateNode, onDeleteNode, isDark, onToggle
           </button>
         </div>
       </div>
+
+      {createEntry && (
+        <AtomCreateCapture entry={createEntry} onSave={handleCreateSave} onCancel={() => setCreateEntry(null)} />
+      )}
     </div>
   );
 }
