@@ -4301,17 +4301,16 @@ function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
 // corresponding capture screen. Deliberately built on the same circle
 // VoiceOrKeyboardInput's own "choice" phase already uses (same size,
 // divider, shadow, and label treatment) rather than a new design.
-function AtomCreateTile({ onMic, onKeyboard, onCancel }) {
+function AtomCreateTile({ onMic, onKeyboard }) {
   const PALETTE = useTheme();
   const t = useT();
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6">
-      <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>{t("Название")}</p>
+    <div className="flex-1 flex flex-col items-center justify-center px-6">
       <div
         className="flex overflow-hidden"
         style={{
-          width: "220px",
-          height: "220px",
+          width: "160px",
+          height: "160px",
           borderRadius: "50%",
           boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}`,
           border: `1px solid ${PALETTE.cardEdge}`,
@@ -4319,24 +4318,21 @@ function AtomCreateTile({ onMic, onKeyboard, onCancel }) {
       >
         <button
           onClick={onMic}
-          className="flex-1 flex flex-col items-center justify-center gap-2"
+          className="flex-1 flex flex-col items-center justify-center gap-1.5"
           style={{ background: PALETTE.chip, borderRight: `1px solid ${PALETTE.cardEdge}`, color: PALETTE.mustard }}
         >
-          <Mic size={30} />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem", color: PALETTE.fadeText }}>{t("Микрофон")}</span>
+          <Mic size={22} />
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Микрофон")}</span>
         </button>
         <button
           onClick={onKeyboard}
-          className="flex-1 flex flex-col items-center justify-center gap-2"
+          className="flex-1 flex flex-col items-center justify-center gap-1.5"
           style={{ background: PALETTE.chip, color: PALETTE.mustard }}
         >
-          <Keyboard size={30} />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem", color: PALETTE.fadeText }}>{t("Клавиатура")}</span>
+          <Keyboard size={22} />
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Клавиатура")}</span>
         </button>
       </div>
-      <button onClick={onCancel} style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
-        {t("Отмена")}
-      </button>
     </div>
   );
 }
@@ -4557,7 +4553,7 @@ function AtomKeyboardCapture({ text, setText, onSave, onCancel }) {
 // never title/description, always the new atom's thought stream. The
 // caller decides what "the new atom" means: the tree's root, or a manual
 // child under the current center.
-function AtomCreateFlow({ onSave, onCancel }) {
+function AtomCreateFlow({ onSave }) {
   const [phase, setPhase] = useState("tile"); // "tile" | "mic" | "keyboard"
   const [text, setText] = useState("");
 
@@ -4575,7 +4571,7 @@ function AtomCreateFlow({ onSave, onCancel }) {
   if (phase === "keyboard") {
     return <AtomKeyboardCapture text={text} setText={setText} onSave={onSave} onCancel={() => setPhase("tile")} />;
   }
-  return <AtomCreateTile onMic={() => setPhase("mic")} onKeyboard={() => setPhase("keyboard")} onCancel={onCancel} />;
+  return <AtomCreateTile onMic={() => setPhase("mic")} onKeyboard={() => setPhase("keyboard")} />;
 }
 
 // Full-screen "Card" mode for one atom: a title/description pair (compact
@@ -4785,6 +4781,10 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
       setCardMode(false);
       return;
     }
+    if (creating) {
+      setCreating(false);
+      return;
+    }
     if (path.length === 0) return;
     setPath((p) => p.slice(0, -1));
     resetLocalNav();
@@ -4939,6 +4939,9 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
             <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
           </div>
           <ModeSwitch mode={mode} onChange={changeMode} />
+          <p className="text-[10px] mt-1 opacity-60" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.waiting }}>
+            build {__BUILD_SHA__}
+          </p>
         </div>
       ) : (
         <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
@@ -4958,7 +4961,7 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
       )}
 
       {showCreateFlow ? (
-        <AtomCreateFlow key={center ? center.id : "root"} onSave={handleCreateSave} onCancel={() => setCreating(false)} />
+        <AtomCreateFlow key={center ? center.id : "root"} onSave={handleCreateSave} />
       ) : (
         <div ref={ringRef} className="flex-1 relative" onPointerDown={handlePointerDown} style={{ touchAction: "none" }}>
           <button
