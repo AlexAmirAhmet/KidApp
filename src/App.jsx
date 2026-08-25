@@ -3979,20 +3979,21 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// ATOMS — a single orbital tree (not a list of independent trees/tabs):
-// one root ("level 1"), shown either as a compact orbit (a center with up
+// ATOMS — a forest of independent orbital trees, one per atom the user has
+// created. The dashboard (AtomsDashboard) lists every atom as a grid card,
+// same layout as the Language/Focus dashboards; opening one enters its own
+// tree (AtomTreeScreen), shown either as a compact orbit (a center with up
 // to 9 small "electrons" circling it) or, one tap in, as a full-screen
 // card with a title/description pair and a free-form stream of thoughts.
-// Stored as one object under "atoms-v2" — null until the first atom is
-// created.
+// Stored as an array under "atoms-v3" — one entry per root atom.
 //
 // Depth-based behavior: a node at depth 0 or 1 ("level 1"/"level 2") gets
-// its 9 children auto-generated the moment it has content — the root gets
-// them immediately on creation (see useAtomTree.createRoot), a deeper
+// its 9 children auto-generated the moment it has content — a root gets
+// them immediately on creation (see useAtomForest.createRoot), a deeper
 // level-1/2 node gets them the moment it's later named (see
-// AtomsScreen.handleCardSave). A node at depth 2 or deeper ("level 3+")
+// AtomTreeScreen.handleCardSave). A node at depth 2 or deeper ("level 3+")
 // never auto-populates; instead, an empty one shows the same creation
-// tile the root shows before it exists, and a non-empty one shows its
+// tile a new atom shows on the dashboard, and a non-empty one shows its
 // children plus a small "+" to add more, one at a time, without limit.
 // ════════════════════════════════════════════════════════════════════════
 
@@ -4029,19 +4030,22 @@ function resolveAtomChain(root, path) {
   return chain;
 }
 
-// A single persistent tree. `root` is null until the first atom is ever
-// created; from then on it's always the one true root.
-function useAtomTree() {
-  const [root, setRoot] = useState(null);
+// A forest of independent atoms: `roots` is an array, one entry per atom
+// the user has created (the Атомы dashboard shows one grid card per
+// entry). Node ids are globally unique (uid()), so updateAtomInForest and
+// removeAtomNode can search the whole forest without needing to know
+// which specific root a node belongs to.
+function useAtomForest() {
+  const [roots, setRoots] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await window.storage.get("atoms-v2", false);
+        const res = await window.storage.get("atoms-v3", false);
         if (!cancelled && res && res.value) {
           const parsed = JSON.parse(res.value);
-          if (parsed && typeof parsed === "object") setRoot(parsed);
+          if (Array.isArray(parsed)) setRoots(parsed);
         }
       } catch (e) {
         // nothing saved yet
@@ -4053,17 +4057,20 @@ function useAtomTree() {
   }, []);
 
   const persist = useCallback(async (next) => {
-    setRoot(next);
+    setRoots(next);
     try {
-      await window.storage.set("atoms-v2", JSON.stringify(next), false);
+      await window.storage.set("atoms-v3", JSON.stringify(next), false);
     } catch (e) {
       console.error("Storage error", e);
     }
   }, []);
 
-  // Creates the root itself, already carrying its 9 auto-generated
+  // Creates a new root atom, already carrying its 9 auto-generated
   // children — the captured thought is what commits it into existence, so
   // there's something orbital to land on right away, name still pending.
+  // Appended to the end of the forest; the dashboard's create tile stays
+  // last because it's rendered after this array, not from any ordering
+  // logic here.
   const createRoot = useCallback(
     (thoughts) => {
       const node = {
@@ -4071,36 +4078,30 @@ function useAtomTree() {
         thoughts,
         children: Array.from({ length: ATOM_CHILD_COUNT }, () => makeEmptyAtomNode()),
       };
-      persist(node);
+      persist([...roots, node]);
       return node.id;
     },
-    [persist]
+    [roots, persist]
   );
 
   const updateNode = useCallback(
     (nodeId, updater) => {
-      if (!root) return;
-      const next = nodeId === root.id ? updater(root) : updateAtomInForest([root], nodeId, updater)[0];
-      persist(next);
+      persist(updateAtomInForest(roots, nodeId, updater));
     },
-    [root, persist]
+    [roots, persist]
   );
 
-  // Deleting the root resets the tree to nothing (back to the creation
-  // tile); deleting any deeper node just prunes it from its parent.
+  // Deleting a root atom removes it from the forest entirely; deleting any
+  // deeper node just prunes it from whichever tree it's in.
   const deleteNode = useCallback(
     (nodeId) => {
-      if (!root) return;
-      if (nodeId === root.id) {
-        persist(null);
-        return;
-      }
-      persist({ ...root, children: removeAtomNode(root.children || [], nodeId) });
+      const isRoot = roots.some((r) => r.id === nodeId);
+      persist(isRoot ? roots.filter((r) => r.id !== nodeId) : removeAtomNode(roots, nodeId));
     },
-    [root, persist]
+    [roots, persist]
   );
 
-  return { root, createRoot, updateNode, deleteNode };
+  return { roots, createRoot, updateNode, deleteNode };
 }
 
 // The round mic/keyboard input used to edit an already-created atom's
@@ -4296,43 +4297,43 @@ function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
   );
 }
 
-// Step 1 of atom creation: a passive tile embedded directly in the flow
-// (no modal, no page change) — tapping either half activates the
-// corresponding capture screen. Deliberately built on the same circle
-// VoiceOrKeyboardInput's own "choice" phase already uses (same size,
-// divider, shadow, and label treatment) rather than a new design.
-function AtomCreateTile({ onMic, onKeyboard }) {
+// Step 1 of atom creation: a passive tile — tapping either half activates
+// the corresponding capture screen. Deliberately built on the same circle
+// VoiceOrKeyboardInput's own "choice" phase already uses (divider, shadow,
+// and label treatment) rather than a new design. Just the circle itself —
+// AtomCreateFlow wraps it to fit either a dashboard grid cell or the full
+// inline area inside an atom's own tree, since those need different sizing.
+function AtomCreateTile({ onMic, onKeyboard, size = 160 }) {
   const PALETTE = useTheme();
   const t = useT();
+  const iconSize = Math.round(size * 0.14);
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-6">
-      <div
-        className="flex overflow-hidden"
-        style={{
-          width: "160px",
-          height: "160px",
-          borderRadius: "50%",
-          boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}`,
-          border: `1px solid ${PALETTE.cardEdge}`,
-        }}
+    <div
+      className="flex overflow-hidden"
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        borderRadius: "50%",
+        boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}`,
+        border: `1px solid ${PALETTE.cardEdge}`,
+      }}
+    >
+      <button
+        onClick={onMic}
+        className="flex-1 flex flex-col items-center justify-center gap-1.5"
+        style={{ background: PALETTE.chip, borderRight: `1px solid ${PALETTE.cardEdge}`, color: PALETTE.mustard }}
       >
-        <button
-          onClick={onMic}
-          className="flex-1 flex flex-col items-center justify-center gap-1.5"
-          style={{ background: PALETTE.chip, borderRight: `1px solid ${PALETTE.cardEdge}`, color: PALETTE.mustard }}
-        >
-          <Mic size={22} />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Микрофон")}</span>
-        </button>
-        <button
-          onClick={onKeyboard}
-          className="flex-1 flex flex-col items-center justify-center gap-1.5"
-          style={{ background: PALETTE.chip, color: PALETTE.mustard }}
-        >
-          <Keyboard size={22} />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Клавиатура")}</span>
-        </button>
-      </div>
+        <Mic size={iconSize} />
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Микрофон")}</span>
+      </button>
+      <button
+        onClick={onKeyboard}
+        className="flex-1 flex flex-col items-center justify-center gap-1.5"
+        style={{ background: PALETTE.chip, color: PALETTE.mustard }}
+      >
+        <Keyboard size={iconSize} />
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.65rem", color: PALETTE.fadeText }}>{t("Клавиатура")}</span>
+      </button>
     </div>
   );
 }
@@ -4553,7 +4554,13 @@ function AtomKeyboardCapture({ text, setText, onSave, onCancel }) {
 // never title/description, always the new atom's thought stream. The
 // caller decides what "the new atom" means: the tree's root, or a manual
 // child under the current center.
-function AtomCreateFlow({ onSave }) {
+// variant "inline" (default) centers the passive tile in a full flex
+// column — used inside an atom's own tree (the level 2+ bootstrap tile,
+// and the manual "+" flow). variant "grid" instead sizes it to sit as one
+// cell of the Атомы dashboard's 2-column card grid, always in the last
+// slot. Either way, once Mic or Keyboard is tapped the same full-screen
+// capture takes over regardless of where it was triggered from.
+function AtomCreateFlow({ onSave, variant = "inline" }) {
   const [phase, setPhase] = useState("tile"); // "tile" | "mic" | "keyboard"
   const [text, setText] = useState("");
 
@@ -4571,7 +4578,15 @@ function AtomCreateFlow({ onSave }) {
   if (phase === "keyboard") {
     return <AtomKeyboardCapture text={text} setText={setText} onSave={onSave} onCancel={() => setPhase("tile")} />;
   }
-  return <AtomCreateTile onMic={() => setPhase("mic")} onKeyboard={() => setPhase("keyboard")} />;
+  const tile = <AtomCreateTile onMic={() => setPhase("mic")} onKeyboard={() => setPhase("keyboard")} size={variant === "grid" ? 132 : 160} />;
+  if (variant === "grid") {
+    return (
+      <div className="flex items-center justify-center" style={{ minHeight: "182px" }}>
+        {tile}
+      </div>
+    );
+  }
+  return <div className="flex-1 flex flex-col items-center justify-center px-6">{tile}</div>;
 }
 
 // Full-screen "Card" mode for one atom: a title/description pair (compact
@@ -4710,15 +4725,20 @@ const ATOM_MIN_SCALE = 0.6;
 const ATOM_MAX_SCALE = 2.4;
 const ATOM_SCALE_STEP = 0.15;
 
-// The single top-level Atoms view. At depth <= 0 (the root's own orbit, or
-// no root yet) it renders the same tagline/toggles/ModeSwitch chrome every
-// other top-level section uses — it IS this section's "home," there's no
-// separate list-of-trees dashboard above it anymore. At depth >= 1 it
-// switches to a compact back-arrow header instead, matching how every
-// other section's deep views behave. Manages its own `path` (ids from the
-// root down to the current center); entering a child just pushes onto
-// `path` and re-renders.
-function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, onToggleTheme, mode, changeMode, lang, toggleLanguage }) {
+// One atom's own tree: the orbital (electron ring) navigation plus its
+// Card mode, scoped to a single root out of the Атомы forest — reached
+// only after opening a specific atom from the dashboard grid, so `root`
+// is always a real node here (never null). Always shows the compact
+// back-arrow header, matching how every other section's deep views
+// behave; the tagline/toggles/ModeSwitch dashboard chrome lives one
+// level up, in AtomsDashboard, not here. At depth 0 the back arrow reads
+// "Home" and exits to the dashboard via onHome, mirroring the same
+// "Home" convention every other section uses to leave a detail view for
+// its list; at depth >= 1 it reads "Назад" and just pops one level up
+// the tree. Manages its own `path` (ids from the root down to the
+// current center); entering a child just pushes onto `path` and
+// re-renders.
+function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
   const t = useT();
   const [path, setPath] = useState([]);
@@ -4735,14 +4755,14 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
   const pointersRef = useRef(new Map());
   const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
-  const chain = root ? resolveAtomChain(root, path) : [];
+  const chain = resolveAtomChain(root, path);
   const center = chain[chain.length - 1] || null;
-  const depth = chain.length - 1; // -1 while root doesn't exist yet
+  const depth = chain.length - 1;
   const scale = manualScale ?? fitScale;
 
   const showAutoRing = !!center && depth <= ATOM_AUTO_MAX_DEPTH && (center.children || []).length > 0;
   const showManualRing = !!center && depth > ATOM_AUTO_MAX_DEPTH && (center.children || []).length > 0;
-  const needsBootstrapTile = !root || (!!center && depth > ATOM_AUTO_MAX_DEPTH && (center.children || []).length === 0);
+  const needsBootstrapTile = !!center && depth > ATOM_AUTO_MAX_DEPTH && (center.children || []).length === 0;
   const showCreateFlow = creating || needsBootstrapTile;
   const ringItems = showAutoRing ? center.children : showManualRing ? [...(center.children || []), { id: "__add__", isAdd: true }] : [];
 
@@ -4785,7 +4805,10 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
       setCreating(false);
       return;
     }
-    if (path.length === 0) return;
+    if (path.length === 0) {
+      onHome();
+      return;
+    }
     setPath((p) => p.slice(0, -1));
     resetLocalNav();
   };
@@ -4819,11 +4842,6 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
   // mode: at depth <= 1 it already has its 9 auto-generated electrons to
   // show; deeper, it's simply an empty level-3+ node like any other.
   const handleCreateSave = (thoughts) => {
-    if (!root) {
-      onCreateRoot(thoughts);
-      setCreating(false);
-      return;
-    }
     const newNode = { ...makeEmptyAtomNode(), thoughts };
     onUpdateNode(center.id, (n) => ({ ...n, children: [...(n.children || []), newNode] }));
     setPath((p) => [...p, newNode.id]);
@@ -4832,15 +4850,14 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
     setCreating(false);
   };
 
-  // Deletes the currently centered atom. The root going away resets the
-  // whole tree to nothing (handled by useAtomTree.deleteNode), so we just
-  // step back to depth 0; any deeper node is pruned from its parent, and
-  // we step back up to that parent's orbit view.
+  // Deletes the currently centered atom. Deleting the root itself (depth
+  // 0) removes the whole atom from the forest, so there's nothing left in
+  // this tree to show — exit to the dashboard. Any deeper node is pruned
+  // from its parent, and we step back up to that parent's orbit view.
   const handleDeleteNode = () => {
     onDeleteNode(center.id);
     if (depth === 0) {
-      setPath([]);
-      resetLocalNav();
+      onHome();
     } else {
       setPath((p) => p.slice(0, -1));
       resetLocalNav();
@@ -4925,40 +4942,22 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
   const expandedRadius = Math.min(ATOM_EXPANDED_RADIUS * scale, maxExpandedRadius);
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: depth <= 0 ? `radial-gradient(circle at 50% 0%, ${PALETTE.bgGlow}, ${PALETTE.bg})` : PALETTE.bg }}>
-      {depth <= 0 ? (
-        <div className="max-w-lg mx-auto w-full px-6 pt-16 pb-2 flex flex-col items-center shrink-0">
-          <div className="text-center mb-2">
-            <p className="text-sm mb-2 tracking-widest uppercase" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mint }}>
-              {t("Small pieces. Big change.")}
-            </p>
-            <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "2.4rem" }}>{t("Твои атомы")}</h1>
-          </div>
-          <div className="w-full flex justify-end gap-2">
-            <LanguageToggle lang={lang} onToggle={toggleLanguage} />
-            <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
-          </div>
-          <ModeSwitch mode={mode} onChange={changeMode} />
-          <p className="text-[10px] mt-1 opacity-60" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.waiting }}>
-            build {__BUILD_SHA__}
-          </p>
-        </div>
-      ) : (
-        <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
-          <button
-            onClick={handleBack}
-            aria-label={t("Назад")}
-            className="flex items-center gap-1 text-sm shrink-0"
-            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
-            {center?.title || t("Дай мне имя")}
-          </h2>
-          <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
-        </div>
-      )}
+    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+        <button
+          onClick={handleBack}
+          aria-label={depth === 0 ? t("Home") : t("Назад")}
+          className="flex items-center gap-1 text-sm shrink-0"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+        >
+          <ArrowLeft size={16} />
+          {depth === 0 && t("Home")}
+        </button>
+        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {center?.title || t("Дай мне имя")}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
 
       {showCreateFlow ? (
         <AtomCreateFlow key={center ? center.id : "root"} onSave={handleCreateSave} />
@@ -5067,6 +5066,63 @@ function AtomsScreen({ root, onCreateRoot, onUpdateNode, onDeleteNode, isDark, o
         </div>
       )}
     </div>
+  );
+}
+
+// The Атомы dashboard: a 2-column card grid, laid out exactly like the
+// Language/Focus dashboards (same card shape, shadows, and icon-badge
+// treatment) — one card per atom the user has created. The creation tile
+// (Steps 1-4's Mic/Keyboard circle) always sits in the grid's last slot:
+// the only tile when there are no atoms yet, or trailing the most
+// recently created one otherwise. Rendered through the same shared
+// tagline/toggles/ModeSwitch wrapper every other section's dashboard
+// uses (see App()'s dashboard-body dispatch), not a bespoke header.
+function AtomsDashboard({ roots, onOpen, onCreateRoot }) {
+  const PALETTE = useTheme();
+  const t = useT();
+
+  const handleCreateSave = (thoughts) => {
+    onOpen(onCreateRoot(thoughts));
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
+        {roots.map((root) => (
+          <button
+            key={root.id}
+            onClick={() => onOpen(root.id)}
+            className="relative rounded-[28px] pt-10 pb-6 px-4 flex flex-col items-center transition-transform hover:-translate-y-1"
+            style={{
+              height: "182px",
+              background: PALETTE.card,
+              boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+              border: `1px solid ${PALETTE.cardEdge}`,
+            }}
+          >
+            <span
+              className="absolute -top-7 w-14 h-14 rounded-full flex items-center justify-center"
+              style={{
+                background: PALETTE.card,
+                boxShadow: `5px 5px 10px ${PALETTE.shadowDark}, -5px -5px 10px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+                border: `1px solid ${PALETTE.cardEdge}`,
+              }}
+            >
+              <Atom size={22} strokeWidth={1.8} style={{ color: PALETTE.mustard }} />
+            </span>
+            <TileName>{root.title || t("Дай мне имя")}</TileName>
+            <div className="flex-1" />
+            <span className="line-clamp-2 text-center" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.78rem", color: PALETTE.fadeText }}>
+              {root.thoughts || t("Поток мыслей пуст")}
+            </span>
+          </button>
+        ))}
+        <AtomCreateFlow key="dashboard-create" onSave={handleCreateSave} variant="grid" />
+      </div>
+      <p className="text-[10px] mt-6 opacity-60" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.waiting }}>
+        build {__BUILD_SHA__}
+      </p>
+    </>
   );
 }
 
@@ -5383,10 +5439,11 @@ export default function App() {
   const vocab = useVocabulary();
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
-  const { root: atomRoot, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomTree();
+  const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomForest();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
+  const [openAtomRootId, setOpenAtomRootId] = useState(null);
   const [openTextId, setOpenTextId] = useState(null);
   const [pagesCreating, setPagesCreating] = useState(false);
   const [pagesEditingId, setPagesEditingId] = useState(null);
@@ -5482,6 +5539,7 @@ export default function App() {
     ? { items: openDeck.items, setItems: (items) => setDeckItems(openDeck.id, items) }
     : null;
   const openGoal = goals.find((g) => g.id === openGoalId) || null;
+  const openAtomRoot = atomRoots.find((r) => r.id === openAtomRootId) || null;
   const openText = texts.find((t) => t.id === openTextId) || null;
   const editingText = texts.find((t) => t.id === pagesEditingId) || null;
   const openWord = words.find((w) => w.id === openWordId) || null;
@@ -5499,18 +5557,14 @@ export default function App() {
         <style>{FONT_IMPORT}</style>
         <SelectionCapture onAdd={vocab.addEntry} />
 
-        {mode === "atoms" ? (
-          <AtomsScreen
-            root={atomRoot}
-            onCreateRoot={createAtomRoot}
+        {mode === "atoms" && openAtomRoot ? (
+          <AtomTreeScreen
+            root={openAtomRoot}
             onUpdateNode={updateAtomNode}
             onDeleteNode={deleteAtomNode}
+            onHome={() => setOpenAtomRootId(null)}
             isDark={isDark}
             onToggleTheme={toggleTheme}
-            mode={mode}
-            changeMode={changeMode}
-            lang={lang}
-            toggleLanguage={toggleLanguage}
           />
         ) : mode === "pages" && openText ? (
           <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
@@ -5614,6 +5668,8 @@ export default function App() {
                   ? t("Спецификации")
                   : mode === "videos"
                   ? t("Твои видео")
+                  : mode === "atoms"
+                  ? t("Твои атомы")
                   : t("Твои тексты")}
               </h1>
             </div>
@@ -5660,6 +5716,8 @@ export default function App() {
                 createLabel={t("Добавить видео")}
                 rowIcon={Video}
               />
+            ) : mode === "atoms" ? (
+              <AtomsDashboard roots={atomRoots} onOpen={setOpenAtomRootId} onCreateRoot={createAtomRoot} />
             ) : (
               <PagesList
                 texts={texts}
