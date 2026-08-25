@@ -3997,8 +3997,16 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 // children plus a small "+" to add more, one at a time, without limit.
 // ════════════════════════════════════════════════════════════════════════
 
+// `shortTitle` is the compact 1-3 word label shown on the electron itself
+// out on its parent's orbit; `title` is the full name, shown only once
+// the node becomes the center of its own page. They're independent
+// fields — the quick in-place naming flow (see AtomTreeScreen's
+// namingElectronId) sets both to the same captured text at once, but
+// either can end up set without the other (e.g. `title` alone, edited
+// via the pencil in Card mode) — see ringLabel's shortTitle-then-title
+// fallback wherever an electron's label is rendered.
 function makeEmptyAtomNode() {
-  return { id: uid(), title: "", description: "", thoughts: "", children: [] };
+  return { id: uid(), title: "", shortTitle: "", description: "", thoughts: "", children: [] };
 }
 
 function updateAtomInForest(nodes, id, updater) {
@@ -4780,6 +4788,16 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
   const [dragging, setDragging] = useState(false);
   const pointersRef = useRef(new Map());
   const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
+  // Quick in-place naming of a still-unnamed electron: tapping one opens
+  // the same Mic/Keyboard choice tile right at its ring position
+  // ("tile"), which can escalate to the same full-screen mic/keyboard
+  // capture used everywhere else ("mic"/"keyboard"). Only "tile" needs
+  // the outside-tap-dismiss behavior below — once escalated, the capture
+  // screen covers everything and its own Cancel already returns to "tile".
+  const [namingElectronId, setNamingElectronId] = useState(null);
+  const [namingPhase, setNamingPhase] = useState("tile");
+  const [namingText, setNamingText] = useState("");
+  const namingTileRef = useRef(null);
 
   const chain = resolveAtomChain(root, path);
   const center = chain[chain.length - 1] || null;
@@ -4820,6 +4838,9 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
     setCardMode(false);
     setRotation(0);
     setManualScale(null);
+    setNamingElectronId(null);
+    setNamingPhase("tile");
+    setNamingText("");
   };
 
   const handleBack = () => {
@@ -4844,13 +4865,47 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
     resetLocalNav();
   };
 
+  // A still-unnamed electron (no shortTitle and no title) skips the usual
+  // tap-to-expand/tap-to-enter gesture entirely: one tap opens the naming
+  // flow right at its ring position. A named electron keeps the existing
+  // two-tap behavior (expand for a preview, tap again to enter).
   const handleElectronTap = (electron) => {
+    if (!electron.shortTitle && !electron.title) {
+      setExpandedId(electron.id);
+      setNamingElectronId(electron.id);
+      setNamingPhase("tile");
+      setNamingText("");
+      return;
+    }
     if (expandedId === electron.id) {
       enter(electron.id);
     } else {
       setExpandedId(electron.id);
     }
   };
+
+  const cancelNaming = () => {
+    setNamingElectronId(null);
+    setNamingPhase("tile");
+    setNamingText("");
+    setExpandedId(null);
+  };
+
+  // Dismisses the in-place naming tile on any interaction outside it —
+  // tapping elsewhere, starting a ring rotation/pinch drag, or using the
+  // header/zoom controls all count, matching Cancel: nothing gets saved.
+  // Only active during the "tile" (choice-circle) phase; once escalated
+  // to the full-screen mic/keyboard capture there's nothing "outside" to
+  // tap, and its own Cancel button already returns here to "tile".
+  useEffect(() => {
+    if (!namingElectronId || namingPhase !== "tile") return;
+    const onOutsidePointerDown = (e) => {
+      if (namingTileRef.current && namingTileRef.current.contains(e.target)) return;
+      cancelNaming();
+    };
+    window.addEventListener("pointerdown", onOutsidePointerDown, true);
+    return () => window.removeEventListener("pointerdown", onOutsidePointerDown, true);
+  }, [namingElectronId, namingPhase]);
 
   const handleCardSave = (patch) => {
     onUpdateNode(center.id, (n) => {
@@ -4860,6 +4915,26 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
       }
       return updated;
     });
+  };
+
+  // Names a still-unnamed electron in place: the captured text becomes
+  // both its short (orbit) and full (own-page) name at once. Auto-9
+  // generation is keyed on the ELECTRON's own depth (one deeper than the
+  // currently centered parent), matching the same depth <=
+  // ATOM_AUTO_MAX_DEPTH rule handleCardSave already uses when a node is
+  // named from inside its own Card mode.
+  const handleNameElectronSave = (capturedText) => {
+    onUpdateNode(namingElectronId, (n) => {
+      const updated = { ...n, title: capturedText, shortTitle: capturedText };
+      if (depth + 1 <= ATOM_AUTO_MAX_DEPTH && (n.children || []).length === 0) {
+        updated.children = Array.from({ length: ATOM_CHILD_COUNT }, () => makeEmptyAtomNode());
+      }
+      return updated;
+    });
+    setNamingElectronId(null);
+    setNamingPhase("tile");
+    setNamingText("");
+    setExpandedId(null);
   };
 
   // Captured text always lands in the thought stream, never title or
@@ -4955,6 +5030,25 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
     );
   }
 
+  // The naming flow's mic/keyboard phases reuse the same full-screen
+  // capture components as everywhere else in Атомы — same component,
+  // just wired to name this specific electron instead of creating a new
+  // node or editing the centered one.
+  if (namingElectronId && namingPhase === "mic") {
+    return (
+      <AtomMicCapture
+        text={namingText}
+        setText={setNamingText}
+        onSave={handleNameElectronSave}
+        onCancel={() => setNamingPhase("tile")}
+        onSwitchToKeyboard={() => setNamingPhase("keyboard")}
+      />
+    );
+  }
+  if (namingElectronId && namingPhase === "keyboard") {
+    return <AtomKeyboardCapture text={namingText} setText={setNamingText} onSave={handleNameElectronSave} onCancel={() => setNamingPhase("tile")} />;
+  }
+
   const centerSize = ATOM_CENTER_SIZE * scale;
   const electronSize = ATOM_ELECTRON_SIZE * scale;
   const ringRadius = ATOM_RING_RADIUS * scale;
@@ -5043,6 +5137,37 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
             const x = radius * Math.cos(rad);
             const y = radius * Math.sin(rad);
 
+            // Naming this electron in place: the choice tile takes over
+            // its ring slot (same position/size an expanded electron
+            // would occupy) instead of an empty enlarged circle.
+            if (namingElectronId === item.id && namingPhase === "tile") {
+              return (
+                <div
+                  key={item.id}
+                  ref={namingTileRef}
+                  className="absolute rounded-full overflow-hidden"
+                  style={{
+                    top: "50%",
+                    left: "50%",
+                    transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                    zIndex: 5,
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <AtomCreateTile onMic={() => setNamingPhase("mic")} onKeyboard={() => setNamingPhase("keyboard")} size={size} />
+                </div>
+              );
+            }
+
+            // The short (orbit) name is shown here at every ring size —
+            // resting or expanded-for-preview — falling back to the full
+            // title if no separate short name was ever set (e.g. a node
+            // named via the Card-mode pencil, which only sets `title`).
+            // The full title only shows once you've actually entered the
+            // node and it's the page's own center (see the center button
+            // and AtomCardScreen below).
+            const ringLabel = item.shortTitle || item.title;
+
             return (
               <button
                 key={item.id}
@@ -5062,9 +5187,9 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
                   zIndex: isExpanded ? 5 : 1,
                 }}
               >
-                {isExpanded && (
-                  <span className="line-clamp-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: "0.85rem" }}>
-                    {item.title || t("Дай мне имя")}
+                {ringLabel && (
+                  <span className="line-clamp-3 text-center" style={{ fontFamily: "'Fraunces', serif", fontSize: isExpanded ? "0.85rem" : "0.6rem" }}>
+                    {ringLabel}
                   </span>
                 )}
               </button>
