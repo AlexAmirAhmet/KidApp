@@ -4111,7 +4111,6 @@ function useAtomForest() {
 function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
   const PALETTE = useTheme();
   const t = useT();
-  const [lang] = useLanguage();
   const [phase, setPhase] = useState("choice"); // "choice" | "listening" | "edit"
   const [text, setText] = useState(initialText);
   const recognitionRef = useRef(null);
@@ -4134,7 +4133,10 @@ function VoiceOrKeyboardInput({ title, initialText = "", onSave, onCancel }) {
       return;
     }
     const rec = new SR();
-    rec.lang = lang === "en" ? "en-US" : "ru-RU";
+    // Always Russian, regardless of the app's own UI language toggle — the
+    // mic is for capturing thoughts in Russian, not for mirroring whatever
+    // language the interface chrome happens to be showing.
+    rec.lang = "ru-RU";
     rec.interimResults = true;
     rec.continuous = true;
     let finalText = "";
@@ -4350,7 +4352,6 @@ function AtomCreateTile({ onMic, onKeyboard, size = 160 }) {
 function AtomMicCapture({ text, setText, onSave, onCancel, onSwitchToKeyboard }) {
   const PALETTE = useTheme();
   const t = useT();
-  const [lang] = useLanguage();
   const [recognizing, setRecognizing] = useState(false);
   const recognitionRef = useRef(null);
   const startedRef = useRef(false);
@@ -4360,7 +4361,10 @@ function AtomMicCapture({ text, setText, onSave, onCancel, onSwitchToKeyboard })
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     const rec = new SR();
-    rec.lang = lang === "en" ? "en-US" : "ru-RU";
+    // Always Russian, regardless of the app's own UI language toggle — the
+    // mic is for capturing thoughts in Russian, not for mirroring whatever
+    // language the interface chrome happens to be showing.
+    rec.lang = "ru-RU";
     rec.interimResults = true;
     rec.continuous = true;
     let finalText = "";
@@ -4502,10 +4506,32 @@ function AtomMicCapture({ text, setText, onSave, onCancel, onSwitchToKeyboard })
 // step at all: the field is focused immediately (cursor at the end, so a
 // mid-recording switch from Step 2 picks up right where dictation left
 // off) and the system keyboard follows naturally from that focus.
+// Tracks window.visualViewport's height so a fixed-position panel can
+// shrink to match it — the layout viewport (and therefore plain
+// `fixed inset-0` / 100vh sizing) doesn't shrink when the on-screen
+// keyboard opens on mobile, which is exactly what pushes bottom-anchored
+// content like Save/Cancel behind the keyboard. Falls back to
+// window.innerHeight when the API isn't available.
+function useVisualViewportHeight() {
+  const [height, setHeight] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 0));
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setHeight(vv.height);
+    onResize();
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+
+  return height;
+}
+
 function AtomKeyboardCapture({ text, setText, onSave, onCancel }) {
   const PALETTE = useTheme();
   const t = useT();
   const textareaRef = useRef(null);
+  const viewportHeight = useVisualViewportHeight();
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -4516,7 +4542,7 @@ function AtomKeyboardCapture({ text, setText, onSave, onCancel }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 flex flex-col" style={{ background: PALETTE.bg, zIndex: 50 }}>
+    <div className="fixed inset-x-0 top-0 flex flex-col" style={{ background: PALETTE.bg, zIndex: 50, height: `${viewportHeight}px` }}>
       <div className="flex-1 min-h-0 p-4">
         <textarea
           ref={textareaRef}
