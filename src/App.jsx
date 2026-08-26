@@ -5936,7 +5936,17 @@ function PrayerTextView({ fullText }) {
   }
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
-      <p className="whitespace-pre-wrap" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 2 }}>
+      <p
+        className="whitespace-pre-wrap"
+        style={{
+          fontFamily: "'IBM Plex Sans', sans-serif",
+          color: PALETTE.ink,
+          fontSize: "1.05rem",
+          lineHeight: 2,
+          textAlign: "justify",
+          textAlignLast: "justify",
+        }}
+      >
         {fullText}
       </p>
     </div>
@@ -6002,23 +6012,13 @@ function PrayerCardsView({ cards }) {
     <div className="flex-1 flex flex-col items-center justify-center px-6 gap-6">
       <PrayerCard card={card} number={clampedIndex + 1} />
       <div className="flex items-center gap-6">
-        <button
-          onClick={() => setIndex((i) => Math.max(0, i - 1))}
-          disabled={index === 0}
-          className="disabled:opacity-30"
-          style={{ color: PALETTE.fadeText }}
-        >
+        <button onClick={() => setIndex((i) => (i - 1 + cards.length) % cards.length)} style={{ color: PALETTE.fadeText }}>
           <ChevronLeft size={22} />
         </button>
         <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
           {index + 1} / {cards.length}
         </span>
-        <button
-          onClick={() => setIndex((i) => Math.min(cards.length - 1, i + 1))}
-          disabled={index === cards.length - 1}
-          className="disabled:opacity-30"
-          style={{ color: PALETTE.fadeText }}
-        >
+        <button onClick={() => setIndex((i) => (i + 1) % cards.length)} style={{ color: PALETTE.fadeText }}>
           <ChevronRight size={22} />
         </button>
       </div>
@@ -6029,13 +6029,14 @@ function PrayerCardsView({ cards }) {
 function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleTheme }) {
   const PALETTE = useTheme();
   const t = useT();
+  const viewportHeight = useVisualViewportHeight();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const hasContent = !!prayer.fullText.trim() || prayer.cards.length > 0;
   const [editing, setEditing] = useState(!hasContent);
   const [viewMode, setViewMode] = useState("text");
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+    <div className="flex flex-col" style={{ background: PALETTE.bg, height: `${viewportHeight}px` }}>
       <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
         <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
           <ArrowLeft size={16} /> {t("Назад")}
@@ -6080,7 +6081,10 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
       {editing || !hasContent ? (
         <PrayerSetupPanel
           prayer={prayer}
-          onSave={({ fullText, cards }) => onUpdate(prayer.id, { fullText, cards })}
+          onSave={({ fullText, cards }) => {
+            onUpdate(prayer.id, { fullText, cards });
+            if (fullText.trim() || cards.length) setEditing(false);
+          }}
         />
       ) : (
         <>
