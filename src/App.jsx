@@ -37,6 +37,7 @@ import {
   Atom,
   Mic,
   Keyboard,
+  BookHeart,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -364,6 +365,30 @@ const STRINGS = {
   "Удалить атом": { en: "Delete atom" },
   "Увеличить масштаб": { en: "Zoom in" },
   "Уменьшить масштаб": { en: "Zoom out" },
+
+  "Молитвы": { en: "Prayers" },
+  "Твои молитвы": { en: "Your prayers" },
+  "Молитв пока нет. Добавь первую.": { en: "No prayers yet. Add the first one." },
+  "Добавить молитву": { en: "Add a prayer" },
+  "Название молитвы": { en: "Prayer name" },
+  "Язык транскрипции": { en: "Transcription language" },
+  "Русский": { en: "Russian" },
+  "Английский": { en: "English" },
+  "Туркменский": { en: "Turkmen" },
+  "Турецкий": { en: "Turkish" },
+  "Промт для чат-бота": { en: "Prompt for the chatbot" },
+  "Скопировать": { en: "Copy" },
+  "Скопировано": { en: "Copied" },
+  "Текст целиком": { en: "Full text" },
+  "Покарточно": { en: "Cards" },
+  "Текст": { en: "Text" },
+  "Карточки": { en: "Cards" },
+  "Вставьте текст целиком, как прислал чат-бот": { en: "Paste the full text as sent by the chatbot" },
+  "Вставьте карточки построчно, как прислал чат-бот": { en: "Paste the cards line by line, as sent by the chatbot" },
+  "Нет карточек": { en: "No cards" },
+  "Нет текста": { en: "No text" },
+  "Удалить молитву": { en: "Delete prayer" },
+  "тап — перевернуть": { en: "tap to flip" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -5567,6 +5592,489 @@ function SpecsList({ specs, onOpen, onDeleteSelected, onSaveNew }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// PRAYERS — each prayer has a title, a transcription language chosen from a
+// fixed registry, and two independently-filled pieces of content copied by
+// hand from an external chatbot: `fullText` (one scrollable block — the
+// prompt asks for the original text, a blank line, then a transcription of
+// the whole thing) and `cards` (the same prayer split line-by-line, each
+// line a {text, transcription} pair, for the card-based study view). A
+// prayer with neither filled in yet shows its setup panel (the generated
+// prompt + a Copy button, plus the two paste-back fields) by default;
+// existing content switches to a Text/Cards toggle, with a pencil to get
+// back to the setup panel to add or replace either part.
+// ════════════════════════════════════════════════════════════════════════
+
+const PRAYER_TRANSCRIPTION_LANGS = [
+  { key: "ru", label: "Русский" },
+  { key: "en", label: "Английский" },
+  { key: "tm", label: "Туркменский" },
+  { key: "tr", label: "Турецкий" },
+];
+
+function usePrayers() {
+  const [prayers, setPrayers] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("prayers-v1", false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (Array.isArray(parsed)) setPrayers(parsed);
+        }
+      } catch (e) {
+        // nothing saved yet
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setPrayers(next);
+    try {
+      await window.storage.set("prayers-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const addPrayer = useCallback(
+    (title, transcriptionLang) => {
+      const trimmed = title.trim();
+      if (!trimmed) return null;
+      const prayer = { id: uid(), title: trimmed, transcriptionLang, fullText: "", cards: [] };
+      persist([...prayers, prayer]);
+      return prayer.id;
+    },
+    [prayers, persist]
+  );
+
+  const updatePrayer = useCallback(
+    (id, patch) => {
+      persist(prayers.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    },
+    [prayers, persist]
+  );
+
+  const deletePrayer = useCallback(
+    (id) => {
+      persist(prayers.filter((p) => p.id !== id));
+    },
+    [prayers, persist]
+  );
+
+  return { prayers, addPrayer, updatePrayer, deletePrayer };
+}
+
+// Builds the copy-paste prompt for an external chatbot: asks for the named
+// prayer's original text and a transcription in the chosen language, in two
+// clearly headed parts (a full scrollable text, then a numbered line-by-line
+// breakdown for the card format) so the user can copy each part back into
+// the two paste fields in PrayerSetupPanel by hand. Generated in whichever
+// language the app's own UI is currently in.
+function buildPrayerPrompt(title, langKey, lang) {
+  const langLabel = translate(lang, PRAYER_TRANSCRIPTION_LANGS.find((l) => l.key === langKey).label);
+  if (lang === "en") {
+    return `Please give me the text of the prayer "${title}" in two clearly labeled parts, as plain text only (no JSON, no Markdown formatting).
+
+=== FULL TEXT ===
+The original text of the whole prayer, then a blank line, then a transcription of the whole prayer in ${langLabel}.
+
+=== LINE BY LINE ===
+The same prayer split into numbered lines. For each line, exactly one line in this format:
+N. original line text - transcription of that line in ${langLabel}
+
+Example:
+1. بِسْمِ اللَّهِ - Bismillahi
+2. الرَّحْمَٰنِ الرَّحِيمِ - Rahmani Rahim
+
+Reply using only this format, with the two header lines "=== FULL TEXT ===" and "=== LINE BY LINE ===", nothing else added.`;
+  }
+  return `Пришли текст молитвы «${title}» в двух чётко размеченных частях, строго обычным текстом (без JSON и без Markdown-разметки).
+
+=== ТЕКСТ ЦЕЛИКОМ ===
+Оригинальный текст молитвы целиком, затем пустая строка, затем — транскрипция всей молитвы целиком на языке: ${langLabel}.
+
+=== ПОКАРТОЧНО ===
+Та же молитва, разбитая на пронумерованные строки. Для каждой строки — ровно одна строка в формате:
+N. оригинальный текст строки - транскрипция строки на ${langLabel}
+
+Пример:
+1. بِسْمِ اللَّهِ - Bismillâhi
+2. الرَّحْمَٰنِ الرَّحِيمِ - Rahmâni Rahîm
+
+Верни ответ только в этом виде, с двумя заголовками «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===», без ничего лишнего.`;
+}
+
+// Parses the "N. original - transcription" lines the prompt above asks the
+// chatbot to return, using the same "text - translation" delimiter
+// convention as parseCardLine elsewhere in the app (" - ", "=", or "—"),
+// after stripping the leading line number.
+function parsePrayerCards(raw) {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const withoutNumber = line.replace(/^\d+[.)]\s*/, "");
+      const parts = withoutNumber
+        .split(/\s-\s|=|—/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      return { id: uid(), text: parts[0] || withoutNumber, transcription: parts[1] || "" };
+    })
+    .filter((c) => c.text);
+}
+
+function PrayerCreateScreen({ onCancel, onSave }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [title, setTitle] = useState("");
+  const [langKey, setLangKey] = useState("ru");
+
+  return (
+    <div className="min-h-screen flex flex-col items-center px-6 py-16" style={{ background: PALETTE.bg }}>
+      <div className="w-full max-w-md">
+        <button
+          onClick={onCancel}
+          className="flex items-center gap-1 text-sm mb-6"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+        >
+          <ArrowLeft size={16} /> {t("Назад")}
+        </button>
+        <h1 style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.8rem" }} className="mb-6">
+          {t("Добавить молитву")}
+        </h1>
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder={t("Название молитвы")}
+          className="w-full rounded-xl px-4 py-3 outline-none mb-6"
+          style={{
+            background: PALETTE.card,
+            color: PALETTE.ink,
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            border: `1px solid ${PALETTE.cardEdge}`,
+            boxShadow: `inset 2px 2px 5px ${PALETTE.shadowDark}, inset -2px -2px 5px ${PALETTE.shadowLight}`,
+          }}
+        />
+        <p className="text-sm mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          {t("Язык транскрипции")}
+        </p>
+        <div className="flex flex-wrap gap-2 mb-8">
+          {PRAYER_TRANSCRIPTION_LANGS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setLangKey(key)}
+              className="px-4 py-2 rounded-full text-sm"
+              style={{
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                background: langKey === key ? PALETTE.mustard : PALETTE.chip,
+                color: langKey === key ? PALETTE.bgDeep : PALETTE.fadeText,
+              }}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => title.trim() && onSave(title.trim(), langKey)}
+          disabled={!title.trim()}
+          className="w-full py-3 rounded-full disabled:opacity-40"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
+        >
+          {t("Сохранить")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Step-by-step setup: the generated prompt (readonly, with its own Copy
+// button) plus two independent paste-back fields, each with its own Save —
+// the user can fill in one part now and the other later, in either order.
+function PrayerSetupPanel({ prayer, onSaveFullText, onSaveCards }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [lang] = useLanguage();
+  const [copied, setCopied] = useState(false);
+  const [fullTextDraft, setFullTextDraft] = useState(prayer.fullText);
+  const [cardsDraft, setCardsDraft] = useState(prayer.cards.map((c) => `${c.text} - ${c.transcription}`).join("\n"));
+
+  const prompt = useMemo(
+    () => buildPrayerPrompt(prayer.title, prayer.transcriptionLang, lang),
+    [prayer.title, prayer.transcriptionLang, lang]
+  );
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("Clipboard error", e);
+    }
+  };
+
+  const textareaStyle = {
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    background: PALETTE.card,
+    color: PALETTE.ink,
+    border: `1px solid ${PALETTE.cardEdge}`,
+    boxShadow: `inset 2px 2px 5px ${PALETTE.shadowDark}, inset -2px -2px 5px ${PALETTE.shadowLight}`,
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full flex flex-col gap-6">
+      <div>
+        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          {t("Промт для чат-бота")}
+        </p>
+        <textarea readOnly value={prompt} rows={10} className="w-full rounded-2xl p-4 outline-none resize-none text-sm" style={textareaStyle} />
+        <button
+          onClick={handleCopy}
+          className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? t("Скопировано") : t("Скопировать")}
+        </button>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          {t("Текст целиком")}
+        </p>
+        <textarea
+          value={fullTextDraft}
+          onChange={(e) => setFullTextDraft(e.target.value)}
+          placeholder={t("Вставьте текст целиком, как прислал чат-бот")}
+          rows={6}
+          className="w-full rounded-2xl p-4 outline-none resize-none"
+          style={textareaStyle}
+        />
+        <button
+          onClick={() => onSaveFullText(fullTextDraft)}
+          className="w-full mt-3 py-2.5 rounded-full"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
+        >
+          {t("Сохранить")}
+        </button>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          {t("Покарточно")}
+        </p>
+        <textarea
+          value={cardsDraft}
+          onChange={(e) => setCardsDraft(e.target.value)}
+          placeholder={t("Вставьте карточки построчно, как прислал чат-бот")}
+          rows={8}
+          className="w-full rounded-2xl p-4 outline-none resize-none"
+          style={textareaStyle}
+        />
+        <button
+          onClick={() => onSaveCards(parsePrayerCards(cardsDraft))}
+          className="w-full mt-3 py-2.5 rounded-full"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
+        >
+          {t("Сохранить")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrayerTextView({ fullText }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  if (!fullText.trim()) {
+    return (
+      <p className="text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+        {t("Нет текста")}
+      </p>
+    );
+  }
+  return (
+    <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
+      <p className="whitespace-pre-wrap" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 2 }}>
+        {fullText}
+      </p>
+    </div>
+  );
+}
+
+function PrayerCard({ card, flipped, onFlip }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  return (
+    <div onClick={onFlip} className="relative w-full max-w-md cursor-pointer" style={{ perspective: "1200px" }}>
+      <div
+        className="absolute inset-0 rounded-2xl"
+        style={{ background: PALETTE.cardEdge, transform: "rotate(2deg) translateY(6px)", boxShadow: `4px 4px 10px ${PALETTE.shadowDark}` }}
+      />
+      <div
+        className="relative rounded-2xl px-8 py-14 flex flex-col items-center justify-center text-center"
+        style={{
+          background: PALETTE.card,
+          minHeight: "220px",
+          boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+          border: `1px solid ${PALETTE.cardEdge}`,
+        }}
+      >
+        {!flipped ? (
+          <p style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.6rem", lineHeight: 1.4 }}>{card.text}</p>
+        ) : (
+          <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.2rem", lineHeight: 1.4 }}>
+            {card.transcription || t("нет транскрипции")}
+          </p>
+        )}
+        <p className="absolute bottom-4 text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#AEB8BE" }}>
+          {t("тап — перевернуть")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PrayerCardsView({ cards }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [index, setIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  if (cards.length === 0) {
+    return (
+      <p className="text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+        {t("Нет карточек")}
+      </p>
+    );
+  }
+  const card = cards[Math.min(index, cards.length - 1)];
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-6 gap-6">
+      <PrayerCard card={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} />
+      <div className="flex items-center gap-6">
+        <button
+          onClick={() => {
+            setIndex((i) => Math.max(0, i - 1));
+            setFlipped(false);
+          }}
+          disabled={index === 0}
+          className="disabled:opacity-30"
+          style={{ color: PALETTE.fadeText }}
+        >
+          <ChevronLeft size={22} />
+        </button>
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
+          {index + 1} / {cards.length}
+        </span>
+        <button
+          onClick={() => {
+            setIndex((i) => Math.min(cards.length - 1, i + 1));
+            setFlipped(false);
+          }}
+          disabled={index === cards.length - 1}
+          className="disabled:opacity-30"
+          style={{ color: PALETTE.fadeText }}
+        >
+          <ChevronRight size={22} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleTheme }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const hasContent = !!prayer.fullText.trim() || prayer.cards.length > 0;
+  const [editing, setEditing] = useState(!hasContent);
+  const [viewMode, setViewMode] = useState("text");
+
+  return (
+    <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          <ArrowLeft size={16} /> {t("Назад")}
+        </button>
+        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {prayer.title}
+        </h2>
+        <div className="flex items-center gap-2 shrink-0">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => onDelete(prayer.id)}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Да")}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs px-2 py-1 rounded-full"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Отмена")}
+              </button>
+            </div>
+          ) : (
+            <>
+              {hasContent && (
+                <button onClick={() => setEditing((e) => !e)} aria-label={t("Редактировать")} className="p-1" style={{ color: editing ? PALETTE.mustard : PALETTE.fadeText }}>
+                  <Pencil size={15} />
+                </button>
+              )}
+              <button onClick={() => setConfirmDelete(true)} aria-label={t("Удалить молитву")} className="p-1" style={{ color: PALETTE.fadeText }}>
+                <Trash2 size={15} />
+              </button>
+            </>
+          )}
+          <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+        </div>
+      </div>
+
+      {editing || !hasContent ? (
+        <PrayerSetupPanel
+          prayer={prayer}
+          onSaveFullText={(fullText) => onUpdate(prayer.id, { fullText })}
+          onSaveCards={(cards) => onUpdate(prayer.id, { cards })}
+        />
+      ) : (
+        <>
+          <div className="flex justify-center gap-2 pb-4 shrink-0">
+            {[
+              { key: "text", label: t("Текст") },
+              { key: "cards", label: t("Карточки") },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setViewMode(key)}
+                className="px-4 py-1.5 rounded-full text-sm"
+                style={{
+                  fontFamily: "'IBM Plex Sans', sans-serif",
+                  background: viewMode === key ? PALETTE.mustard : PALETTE.chip,
+                  color: viewMode === key ? PALETTE.bgDeep : PALETTE.fadeText,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} /> : <PrayerCardsView cards={prayer.cards} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // App shell — theme, mode switch, routing between the six modes
 // ════════════════════════════════════════════════════════════════════════
 
@@ -5582,6 +6090,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "specs", label: t("Спецификации"), Icon: NotebookPen },
     { key: "videos", label: t("Видео"), Icon: Video },
     { key: "atoms", label: t("Атомы"), Icon: Atom },
+    { key: "prayers", label: t("Молитвы"), Icon: BookHeart },
   ];
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
@@ -5612,10 +6121,13 @@ export default function App() {
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
   const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomForest();
+  const { prayers, addPrayer, updatePrayer, deletePrayer } = usePrayers();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
   const [openAtomRootId, setOpenAtomRootId] = useState(null);
+  const [openPrayerId, setOpenPrayerId] = useState(null);
+  const [prayerCreating, setPrayerCreating] = useState(false);
   const [openTextId, setOpenTextId] = useState(null);
   const [pagesCreating, setPagesCreating] = useState(false);
   const [pagesEditingId, setPagesEditingId] = useState(null);
@@ -5636,7 +6148,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms"].includes(res.value)) setMode(res.value);
+        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms", "prayers"].includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
@@ -5712,6 +6224,7 @@ export default function App() {
     : null;
   const openGoal = goals.find((g) => g.id === openGoalId) || null;
   const openAtomRoot = atomRoots.find((r) => r.id === openAtomRootId) || null;
+  const openPrayer = prayers.find((p) => p.id === openPrayerId) || null;
   const openText = texts.find((t) => t.id === openTextId) || null;
   const editingText = texts.find((t) => t.id === pagesEditingId) || null;
   const openWord = words.find((w) => w.id === openWordId) || null;
@@ -5737,6 +6250,27 @@ export default function App() {
             onHome={() => setOpenAtomRootId(null)}
             isDark={isDark}
             onToggleTheme={toggleTheme}
+          />
+        ) : mode === "prayers" && openPrayer ? (
+          <PrayerScreen
+            prayer={openPrayer}
+            onBack={() => setOpenPrayerId(null)}
+            onUpdate={updatePrayer}
+            onDelete={(id) => {
+              deletePrayer(id);
+              setOpenPrayerId(null);
+            }}
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+          />
+        ) : mode === "prayers" && prayerCreating ? (
+          <PrayerCreateScreen
+            onCancel={() => setPrayerCreating(false)}
+            onSave={(title, langKey) => {
+              const id = addPrayer(title, langKey);
+              setPrayerCreating(false);
+              if (id) setOpenPrayerId(id);
+            }}
           />
         ) : mode === "pages" && openText ? (
           <PagesReader text={openText} onBack={() => setOpenTextId(null)} isDark={isDark} onToggleTheme={toggleTheme} />
@@ -5842,6 +6376,8 @@ export default function App() {
                   ? t("Твои видео")
                   : mode === "atoms"
                   ? t("Твои атомы")
+                  : mode === "prayers"
+                  ? t("Твои молитвы")
                   : t("Твои тексты")}
               </h1>
             </div>
@@ -5890,6 +6426,17 @@ export default function App() {
               />
             ) : mode === "atoms" ? (
               <AtomsDashboard roots={atomRoots} onOpen={setOpenAtomRootId} onCreateRoot={createAtomRoot} />
+            ) : mode === "prayers" ? (
+              <PagesList
+                texts={prayers.map((p) => ({ ...p, body: t(PRAYER_TRANSCRIPTION_LANGS.find((l) => l.key === p.transcriptionLang)?.label || "") }))}
+                onOpen={setOpenPrayerId}
+                onCreate={() => setPrayerCreating(true)}
+                onEdit={setOpenPrayerId}
+                onDelete={deletePrayer}
+                emptyText={t("Молитв пока нет. Добавь первую.")}
+                createLabel={t("Добавить молитву")}
+                rowIcon={BookHeart}
+              />
             ) : (
               <PagesList
                 texts={texts}
