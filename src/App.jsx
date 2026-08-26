@@ -5708,6 +5708,18 @@ N. оригинальный текст строки - транскрипция �
 Верни ответ только в этом виде, с двумя заголовками «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===», без ничего лишнего.`;
 }
 
+// Strips the "=== ... ===" section-header lines the prompt above asks the
+// chatbot to use (in whichever language/casing it echoes them back) — they
+// exist only to mark where to split the reply, never to be shown to the
+// user, so any pasted-back text runs through this before being saved.
+function stripMarkerLines(raw) {
+  return raw
+    .split("\n")
+    .filter((line) => !/^\s*=+[^=]*=+\s*$/.test(line))
+    .join("\n")
+    .trim();
+}
+
 // Parses the "N. original - transcription" lines the prompt above asks the
 // chatbot to return, using the same "text - translation" delimiter
 // convention as parseCardLine elsewhere in the app (" - ", "=", or "—").
@@ -5720,7 +5732,7 @@ N. оригинальный текст строки - транскрипция �
 function parsePrayerCards(raw) {
   const isArabicScript = (s) => /[؀-ۿ]/.test(s);
   const numberRe = /^\d+[.)]\s*/;
-  const lines = raw
+  const lines = stripMarkerLines(raw)
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -5879,7 +5891,7 @@ function PrayerSetupPanel({ prayer, onSaveFullText, onSaveCards }) {
           style={textareaStyle}
         />
         <button
-          onClick={() => onSaveFullText(fullTextDraft)}
+          onClick={() => onSaveFullText(stripMarkerLines(fullTextDraft))}
           className="w-full mt-3 py-2.5 rounded-full"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
         >
