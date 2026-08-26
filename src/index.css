@@ -4,17 +4,16 @@ html,
 body,
 #root {
   height: 100%;
+  /* Best-effort suppression of the browser's native pull-to-refresh
+     gesture. Set on html (the actual document scroller in most engines),
+     not just body, since a rule on body alone is silently ignored by some
+     mobile browsers/WebViews. This alone isn't relied on to satisfy the
+     "stay on the same screen" requirement — see the app-nav-v1
+     persistence in App.jsx, which restores the exact open screen after
+     any reload regardless of whether this suppressed it. */
+  overscroll-behavior-y: contain;
 }
 
 body {
   margin: 0;
-  /* Disables the browser's native pull-to-refresh gesture, which is a
-     real page reload — it remounts the whole app, and per-item navigation
-     state (which deck/goal/prayer/etc. was open) isn't persisted, so a
-     reload always lands back on that section's dashboard regardless of
-     where the pull happened. There's no server to refresh data from here
-     (state lives in localStorage and is already current), so the correct
-     fix is to not let the gesture reload the page at all — normal
-     scrolling inside the page is unaffected. */
-  overscroll-behavior-y: contain;
 }

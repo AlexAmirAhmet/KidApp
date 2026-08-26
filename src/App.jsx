@@ -5380,12 +5380,8 @@ function SpecViewScreen({ spec, onBack }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
-      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center shrink-0">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> {t("Назад")}
-        </button>
-      </div>
-      <div className="max-w-md mx-auto w-full px-6 pt-4 pb-10 flex-1 min-h-0 flex flex-col">
+      <HomeButton onClick={onBack} />
+      <div className="max-w-md mx-auto w-full px-6 pt-16 pb-10 flex-1 min-h-0 flex flex-col">
         <div
           className="flex-1 w-full rounded-xl p-4 overflow-y-auto whitespace-pre-wrap"
           style={{
@@ -5706,6 +5702,18 @@ function usePrayers() {
   return { prayers, addPrayer, updatePrayer, deletePrayer };
 }
 
+// One short, unambiguous description of the transcription alphabet per
+// target language, in both prompt-UI languages — used to spell out exactly
+// which letters are allowed, since "transcription" alone is too vague a
+// word for less instruction-disciplined models (some read it as "translate
+// the meaning" instead of "spell out the sound").
+const PRAYER_SCRIPT_DESC = {
+  ru: { en: "the Cyrillic alphabet only (а, б, в, г, д, е, ё, ж, з, и, й, к, л, м, н, о, п, р, с, т, у, ф, х, ц, ч, ш, щ, ъ, ы, ь, э, ю, я)", ru: "только кириллицей (буквы а, б, в, г, д, е, ё, ж, з, и, й, к, л, м, н, о, п, р, с, т, у, ф, х, ц, ч, ш, щ, ъ, ы, ь, э, ю, я)" },
+  en: { en: "the Latin alphabet only (a-z)", ru: "только латинским алфавитом (a-z)" },
+  tm: { en: "the Latin Turkmen alphabet only (a-z plus ä, ç, ž, ň, ö, ş, ü, ý)", ru: "только латинским туркменским алфавитом (a-z, а также ä, ç, ž, ň, ö, ş, ü, ý)" },
+  tr: { en: "the Latin Turkish alphabet only (a-z plus ç, ğ, ı, ö, ş, ü)", ru: "только латинским турецким алфавитом (a-z, а также ç, ğ, ı, ö, ş, ü)" },
+};
+
 // Builds the copy-paste prompt for an external chatbot: asks for the named
 // prayer's original text and a transcription in the chosen language, in two
 // clearly headed parts (a full scrollable text, then a numbered line-by-line
@@ -5713,49 +5721,85 @@ function usePrayers() {
 // one blob into PrayerSetupPanel's single field and auto-split by
 // parsePrayerReply. Generated in whichever language the app's own UI is
 // currently in.
+//
+// Written to survive chatbots other than the one it was first tested
+// against: short, direct rules instead of one long sentence, the two
+// "===" headers spelled out as machine markers rather than left implicit,
+// a 3-line example instead of 2 (harder to mistake for something else),
+// and an explicit "copy the original, don't translate/summarize it" rule —
+// weaker models sometimes replace the Arabic with a translation, or drop
+// it, rather than transcribing it.
 function buildPrayerPrompt(title, langKey, lang) {
   const langLabel = translate(lang, PRAYER_TRANSCRIPTION_LANGS.find((l) => l.key === langKey).label);
+  const scriptDesc = PRAYER_SCRIPT_DESC[langKey][lang];
   const cyrillicExample = langKey === "ru";
+  const exampleLines = cyrillicExample
+    ? [
+        ["بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "Бисмилляхи ррахмани ррахим"],
+        ["الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "Альхамду лилляхи рабби ль-алямин"],
+        ["الرَّحْمَٰنِ الرَّحِيمِ", "Ррахмани ррахим"],
+      ]
+    : [
+        ["بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "Bismillahi rrahmani rrahim"],
+        ["الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "Alhamdu lillahi rabbi l-alamin"],
+        ["الرَّحْمَٰنِ الرَّحِيمِ", "Rrahmani rrahim"],
+      ];
   if (lang === "en") {
-    const cyrillicRule = cyrillicExample
-      ? `\nIMPORTANT: Use ONLY Cyrillic (Russian) characters for the transcription. NEVER use Latin/English letters for transcription, even for proper names or religious terms.\n`
-      : "";
-    return `Please give me the text of the prayer "${title}" in two clearly labeled parts, as plain text only (no JSON, no Markdown formatting).
-${cyrillicRule}
+    return `Send me the text of the prayer "${title}" as plain text only. No Markdown, no JSON, no comments, no extra words.
+
+RULES:
+1. Copy the ORIGINAL Arabic text exactly as it is. Do not translate it. Do not summarize it. Do not skip any part of it.
+2. Also write a TRANSCRIPTION: spell out how the Arabic SOUNDS, using ${scriptDesc}. This is NOT a translation of the meaning — only the sound, written phonetically.
+3. "=== FULL TEXT ===" and "=== LINE BY LINE ===" below are section markers for a computer program. They are NOT part of the prayer. Write each one ONLY on its own separate line, exactly once. Never place a marker in the middle of the prayer text.
+4. In the "LINE BY LINE" part, every line starts with a number and a period (1. 2. 3. ...), each number on its own separate line. Never combine two numbered lines into one. Never skip a number.
+
+FORMAT TO FOLLOW EXACTLY:
+
 === FULL TEXT ===
-The original text of the whole prayer, then a blank line, then a transcription of the whole prayer in ${langLabel}.
+(the whole original Arabic text, unchanged)
+
+(the whole transcription in ${langLabel})
 
 === LINE BY LINE ===
-The same prayer split into numbered lines. Each line MUST start with its number followed by a period, on its own paragraph — never merge multiple numbered lines together, never omit the number. For each line, exactly one line in this format:
-N. original line text - transcription of that line in ${langLabel}
+1. (Arabic line 1) - (transcription of line 1)
+2. (Arabic line 2) - (transcription of line 2)
+3. (Arabic line 3) - (transcription of line 3)
+(continue with one numbered line for every line of the prayer)
 
-Example:
-1. بِسْمِ اللَّهِ - ${cyrillicExample ? "Бисмилля" : "Bismillahi"}
-2. الرَّحْمَٰنِ الرَّحِيمِ - ${cyrillicExample ? "Рахмани рахим" : "Rahmani Rahim"}
+EXAMPLE of the LINE BY LINE part, first 3 lines of Al-Fatiha (written here in ${cyrillicExample ? "Cyrillic — this is exactly the format to use" : "Latin — replace with " + langLabel}):
+1. ${exampleLines[0][0]} - ${exampleLines[0][1]}
+2. ${exampleLines[1][0]} - ${exampleLines[1][1]}
+3. ${exampleLines[2][0]} - ${exampleLines[2][1]}
 
-The header lines "=== FULL TEXT ===" and "=== LINE BY LINE ===" must appear ONLY on their own separate line, marking the start of each section — never insert them in the middle of the prayer text under any circumstances.
-
-Reply using only this format, with exactly these two header lines, nothing else added.`;
+Reply with ONLY the format above, filled in for "${title}". Nothing before it, nothing after it.`;
   }
-  const cyrillicRule = cyrillicExample
-    ? `\nВАЖНО: транскрипция должна быть написана ТОЛЬКО кириллицей (русскими буквами). НИКОГДА не используй латинские/английские буквы в транскрипции, даже для имён собственных или религиозных терминов.\n`
-    : "";
-  return `Пришли текст молитвы «${title}» в двух чётко размеченных частях, строго обычным текстом (без JSON и без Markdown-разметки).
-${cyrillicRule}
+  return `Пришли текст молитвы «${title}» строго обычным текстом. Без Markdown, без JSON, без комментариев и лишних слов.
+
+ПРАВИЛА:
+1. Скопируй ОРИГИНАЛЬНЫЙ арабский текст без изменений. Не переводи его. Не сокращай его. Не пропускай ни одной части.
+2. Также напиши ТРАНСКРИПЦИЮ: запиши, как арабский текст ЗВУЧИТ, ${scriptDesc}. Это НЕ перевод смысла — только звучание, записанное буквами.
+3. Заголовки «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===» ниже — это метки для компьютерной программы. Они НЕ являются частью молитвы. Пиши каждую метку ТОЛЬКО на своей отдельной строке, ровно один раз. Никогда не вставляй метку в середину текста молитвы.
+4. В части «ПОКАРТОЧНО» каждая строка начинается с номера и точки (1. 2. 3. ...), каждый номер — на своей отдельной строке. Никогда не объединяй две пронумерованные строки в одну. Никогда не пропускай номер.
+
+ФОРМАТ, КОТОРОМУ НУЖНО СЛЕДОВАТЬ ТОЧНО:
+
 === ТЕКСТ ЦЕЛИКОМ ===
-Оригинальный текст молитвы целиком, затем пустая строка, затем — транскрипция всей молитвы целиком на языке: ${langLabel}.
+(весь оригинальный арабский текст, без изменений)
+
+(вся транскрипция целиком на языке: ${langLabel})
 
 === ПОКАРТОЧНО ===
-Та же молитва, разбитая на пронумерованные строки. Каждая строка ОБЯЗАТЕЛЬНО должна начинаться с номера и точки, на отдельном абзаце — никогда не объединяй несколько пронумерованных строк вместе, никогда не пропускай номер. Для каждой строки — ровно одна строка в формате:
-N. оригинальный текст строки - транскрипция строки на ${langLabel}
+1. (арабская строка 1) - (транскрипция строки 1)
+2. (арабская строка 2) - (транскрипция строки 2)
+3. (арабская строка 3) - (транскрипция строки 3)
+(дальше — по одной пронумерованной строке на каждую строку молитвы)
 
-Пример:
-1. بِسْمِ اللَّهِ - ${cyrillicExample ? "Бисмилля" : "Bismillâhi"}
-2. الرَّحْمَٰنِ الرَّحِيمِ - ${cyrillicExample ? "Рахмани рахим" : "Rahmâni Rahîm"}
+ПРИМЕР части ПОКАРТОЧНО, первые 3 аята суры Аль-Фатиха (здесь показано ${cyrillicExample ? "кириллицей — именно этот формат и нужен" : "латиницей — замени на " + langLabel}):
+1. ${exampleLines[0][0]} - ${exampleLines[0][1]}
+2. ${exampleLines[1][0]} - ${exampleLines[1][1]}
+3. ${exampleLines[2][0]} - ${exampleLines[2][1]}
 
-Заголовки «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===» должны стоять ТОЛЬКО каждый на своей отдельной строке, обозначая начало соответствующей части — никогда не вставляй их внутрь текста молитвы ни при каких обстоятельствах.
-
-Верни ответ только в этом виде, с этими двумя заголовками, без ничего лишнего.`;
+Верни ТОЛЬКО формат выше, заполненный для «${title}». Ничего до него, ничего после него.`;
 }
 
 // Strips the "=== ... ===" section-header lines the prompt above asks the
@@ -6061,36 +6105,44 @@ function PrayerSetupPanel({ prayer, onSave }) {
   );
 }
 
-function PrayerTextView({ fullText }) {
+function PrayerTextView({ fullText, cards }) {
   const PALETTE = useTheme();
   const t = useT();
-  if (!fullText.trim()) {
+  if (!cards.length && !fullText.trim()) {
     return (
       <p className="text-center py-10" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
         {t("Нет текста")}
       </p>
     );
   }
+  const lineStyle = { fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 2 };
+  if (cards.length) {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
+        <div>
+          {cards.map((c) => (
+            <p key={c.id} dir="rtl" className="w-full text-center" style={lineStyle}>
+              {c.text}
+            </p>
+          ))}
+        </div>
+        <div className="mt-10">
+          {cards.map((c) => (
+            <p key={c.id} className="w-full text-center" style={lineStyle}>
+              {c.transcription}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
-      {fullText.split("\n").map((line, i) => {
-        const arabic = isArabicScript(line);
-        return (
-          <p
-            key={i}
-            dir={arabic ? "rtl" : "ltr"}
-            style={{
-              fontFamily: "'IBM Plex Sans', sans-serif",
-              color: PALETTE.ink,
-              fontSize: "1.05rem",
-              lineHeight: 2,
-              textAlign: arabic ? "right" : "left",
-            }}
-          >
-            {line || " "}
-          </p>
-        );
-      })}
+      {fullText.split("\n").map((line, i) => (
+        <p key={i} dir={isArabicScript(line) ? "rtl" : "ltr"} className="w-full text-center" style={lineStyle}>
+          {line || "\u00a0"}
+        </p>
+      ))}
     </div>
   );
 }
@@ -6200,10 +6252,8 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
 
   return (
     <div className="fixed inset-x-0 top-0 flex flex-col" style={{ background: PALETTE.bg, height: `${viewportHeight}px` }}>
+      <HomeButton onClick={onBack} />
       <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> {t("Назад")}
-        </button>
         <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
           {prayer.title}
         </h2>
@@ -6273,7 +6323,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
           <div className="px-6 pb-10 max-w-md mx-auto w-full shrink-0">
             <BasmalaWatermark />
           </div>
-          {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} /> : <PrayerCardsView cards={prayer.cards} />}
+          {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} cards={prayer.cards} /> : <PrayerCardsView cards={prayer.cards} />}
         </>
       )}
     </div>
@@ -6348,6 +6398,7 @@ export default function App() {
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
   const [reversed, setReversedRaw] = useState(false);
   const [lang, setLangRaw] = useState("ru");
+  const navRestored = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -6372,11 +6423,54 @@ export default function App() {
         const res = await window.storage.get("language-v1", false);
         if (!cancelled && res && (res.value === "ru" || res.value === "en")) setLangRaw(res.value);
       } catch (e) {}
+      // Restores exactly which item was open (deck/goal/prayer/text/etc.)
+      // so a reload — pull-to-refresh, a manual browser refresh, or the PWA
+      // simply relaunching — lands back on the same screen instead of that
+      // section's dashboard. overscroll-behavior in index.css is a
+      // best-effort attempt to stop the reload gesture itself, but it isn't
+      // honored identically by every browser/WebView, so this restoration
+      // is the layer that actually guarantees the requirement regardless of
+      // whether the gesture was suppressed.
+      try {
+        const res = await window.storage.get("app-nav-v1", false);
+        if (!cancelled && res && res.value) {
+          const nav = JSON.parse(res.value);
+          if (nav.openDeckId) setOpenDeckId(nav.openDeckId);
+          if (nav.openGoalId) setOpenGoalId(nav.openGoalId);
+          if (nav.openAtomRootId) setOpenAtomRootId(nav.openAtomRootId);
+          if (nav.openPrayerId) setOpenPrayerId(nav.openPrayerId);
+          if (nav.openTextId) setOpenTextId(nav.openTextId);
+          if (nav.openWordId) setOpenWordId(nav.openWordId);
+          if (nav.openSpecId) setOpenSpecId(nav.openSpecId);
+          if (nav.openVideoId) setOpenVideoId(nav.openVideoId);
+        }
+      } catch (e) {}
+      // Only after this restoration attempt has actually finished (whether
+      // it found something or not) is it safe to let the persist effect
+      // below start writing — otherwise its very first run, still holding
+      // every id at its useState(null) default, fires before this async
+      // restore resolves and overwrites the just-read value with nulls,
+      // permanently losing it before it's ever applied.
+      if (!cancelled) navRestored.current = true;
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Persists the navigation blob restored above on every change, so the
+  // very next reload (from any cause) always has an up-to-date screen to
+  // come back to.
+  useEffect(() => {
+    if (!navRestored.current) return;
+    window.storage
+      .set(
+        "app-nav-v1",
+        JSON.stringify({ openDeckId, openGoalId, openAtomRootId, openPrayerId, openTextId, openWordId, openSpecId, openVideoId }),
+        false
+      )
+      .catch(() => {});
+  }, [openDeckId, openGoalId, openAtomRootId, openPrayerId, openTextId, openWordId, openSpecId, openVideoId]);
 
   const setShowTranscription = useCallback((next) => {
     setShowTranscriptionRaw((prev) => {
