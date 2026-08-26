@@ -444,6 +444,34 @@ function ThemeToggle({ isDark, onToggle, size = 15 }) {
   );
 }
 
+// Sits in the same top-row control group as LanguageToggle/ThemeToggle,
+// shown only on the Молитвы dashboard — the explicit, on-demand
+// replacement for pull-to-refresh there. `onRefresh` is the real re-fetch
+// from storage (usePrayers().refresh), not a decorative spin: the spin is
+// just feedback that the click registered, driven by local state rather
+// than by whether the fetch actually changed anything.
+function RefreshButton({ onRefresh }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [spinning, setSpinning] = useState(false);
+  const handleClick = () => {
+    onRefresh();
+    setSpinning(true);
+    setTimeout(() => setSpinning(false), 500);
+  };
+  return (
+    <button
+      onClick={handleClick}
+      aria-label={t("Обновить")}
+      title={t("Обновить")}
+      className="p-2 rounded-full flex items-center justify-center"
+      style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+    >
+      <RefreshCw size={15} style={{ transition: "transform 0.5s ease", transform: spinning ? "rotate(360deg)" : "rotate(0deg)" }} />
+    </button>
+  );
+}
+
 // Icon-only "back to this section's dashboard" button, fixed to a
 // constant on-screen position so it's always reachable without scrolling
 // — replaces every screen's former in-flow "← Home" text button.
@@ -2876,37 +2904,15 @@ function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlac
 // A flat list of {id, title, body} documents with create/edit/delete — backs
 // both the Pages dashboard and the Слово dashboard, which only differ in
 // copy and icon.
-function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, createLabel, rowIcon: RowIcon = BookOpen, onRefresh }) {
+function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, createLabel, rowIcon: RowIcon = BookOpen }) {
   const PALETTE = useTheme();
   const t = useT();
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [refreshSpin, setRefreshSpin] = useState(false);
   const resolvedEmptyText = emptyText ?? t("Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.");
   const resolvedCreateLabel = createLabel ?? t("Добавить текст");
 
-  const handleRefresh = () => {
-    onRefresh();
-    setRefreshSpin(true);
-    setTimeout(() => setRefreshSpin(false), 500);
-  };
-
   return (
     <div className="w-full max-w-md px-6 pt-8">
-      {/* Only passed in for the Молитвы dashboard — the explicit, on-demand
-          replacement for pull-to-refresh there, not a general list-refresh
-          affordance every PagesList-based dashboard should show. */}
-      {onRefresh && (
-        <div className="flex justify-end mb-3">
-          <button
-            onClick={handleRefresh}
-            aria-label={t("Обновить")}
-            className="w-9 h-9 rounded-full flex items-center justify-center"
-            style={{ background: PALETTE.chip, color: PALETTE.fadeText, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
-          >
-            <RefreshCw size={16} style={{ transition: "transform 0.5s ease", transform: refreshSpin ? "rotate(360deg)" : "rotate(0deg)" }} />
-          </button>
-        </div>
-      )}
       {texts.length === 0 ? (
         <div className="flex flex-col items-center gap-6 py-10">
           <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
@@ -6719,6 +6725,7 @@ export default function App() {
 
             <div className="w-full flex justify-end max-w-lg gap-2">
               <LanguageToggle lang={lang} onToggle={toggleLanguage} />
+              {mode === "prayers" && <RefreshButton onRefresh={refreshPrayers} />}
               <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
             </div>
 
@@ -6777,7 +6784,6 @@ export default function App() {
                 emptyText={t("Молитв пока нет. Добавь первую.")}
                 createLabel={t("Добавить молитву")}
                 rowIcon={BookHeart}
-                onRefresh={refreshPrayers}
               />
             ) : (
               <PagesList
