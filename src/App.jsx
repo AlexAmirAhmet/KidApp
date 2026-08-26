@@ -5719,6 +5719,11 @@ function stripMarkerLines(raw) {
     .trim();
 }
 
+// Prayer originals are always Arabic script (RTL); transcriptions are
+// always Latin/Cyrillic (LTR). Used both to group raw pasted-back lines
+// (parsePrayerCards) and to align rendered text correctly (PrayerTextView).
+const isArabicScript = (s) => /[؀-ۿ]/.test(s);
+
 // Parses the "N. original - transcription" lines the prompt above asks the
 // chatbot to return, using the same "text - translation" delimiter
 // convention as parseCardLine elsewhere in the app (" - ", "=", or "—").
@@ -5729,7 +5734,6 @@ function stripMarkerLines(raw) {
 // card count always matches the number of verses, not the number of
 // raw text lines.
 function parsePrayerCards(raw) {
-  const isArabicScript = (s) => /[؀-ۿ]/.test(s);
   const numberRe = /^\d+[.)]\s*/;
   const lines = stripMarkerLines(raw)
     .split("\n")
@@ -5885,36 +5889,41 @@ function PrayerSetupPanel({ prayer, onSave }) {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full flex flex-col gap-6">
-      <div>
-        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          {t("Промт для чат-бота")}
-        </p>
-        <textarea readOnly value={prompt} rows={10} className="w-full rounded-2xl p-4 outline-none resize-none text-sm" style={textareaStyle} />
-        <button
-          onClick={handleCopy}
-          className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? t("Скопировано") : t("Скопировать")}
-        </button>
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 max-w-md mx-auto w-full flex flex-col gap-6">
+        <div>
+          <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            {t("Промт для чат-бота")}
+          </p>
+          <textarea readOnly value={prompt} rows={10} className="w-full rounded-2xl p-4 outline-none resize-none text-sm" style={textareaStyle} />
+          <button
+            onClick={handleCopy}
+            className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.mustard, color: PALETTE.bgDeep }}
+          >
+            {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? t("Скопировано") : t("Скопировать")}
+          </button>
+        </div>
+
+        <div>
+          <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+            {t("Ответ чат-бота")}
+          </p>
+          <textarea
+            value={replyDraft}
+            onChange={(e) => setReplyDraft(e.target.value)}
+            placeholder={t("Вставьте сюда весь ответ чат-бота целиком")}
+            rows={12}
+            className="w-full rounded-2xl p-4 outline-none resize-none"
+            style={textareaStyle}
+          />
+        </div>
       </div>
 
-      <div>
-        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          {t("Ответ чат-бота")}
-        </p>
-        <textarea
-          value={replyDraft}
-          onChange={(e) => setReplyDraft(e.target.value)}
-          placeholder={t("Вставьте сюда весь ответ чат-бота целиком")}
-          rows={12}
-          className="w-full rounded-2xl p-4 outline-none resize-none"
-          style={textareaStyle}
-        />
+      <div className="shrink-0 px-6 pt-3 pb-6 max-w-md mx-auto w-full">
         <button
           onClick={() => onSave(parsePrayerReply(replyDraft))}
-          className="w-full mt-3 py-2.5 rounded-full"
+          className="w-full py-2.5 rounded-full"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
         >
           {t("Сохранить")}
@@ -5936,9 +5945,24 @@ function PrayerTextView({ fullText }) {
   }
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
-      <p className="whitespace-pre-wrap" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 2 }}>
-        {fullText}
-      </p>
+      {fullText.split("\n").map((line, i) => {
+        const arabic = isArabicScript(line);
+        return (
+          <p
+            key={i}
+            dir={arabic ? "rtl" : "ltr"}
+            style={{
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              color: PALETTE.ink,
+              fontSize: "1.05rem",
+              lineHeight: 2,
+              textAlign: arabic ? "right" : "left",
+            }}
+          >
+            {line || " "}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -5975,8 +5999,10 @@ function PrayerCard({ card, number }) {
         >
           {number}
         </span>
-        <p style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4 }}>{card.text}</p>
-        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4 }}>
+        <p dir="rtl" className="w-full" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4, textAlign: "right" }}>
+          {card.text}
+        </p>
+        <p dir="ltr" className="w-full" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4, textAlign: "left" }}>
           {card.transcription || t("нет транскрипции")}
         </p>
       </div>
