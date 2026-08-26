@@ -4951,18 +4951,35 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
     setCreating(false);
   };
 
-  // Deletes the currently centered atom. Deleting the root itself (depth
-  // 0) removes the whole atom from the forest, so there's nothing left in
-  // this tree to show — exit to the dashboard. Any deeper node is pruned
-  // from its parent, and we step back up to that parent's orbit view.
+  // Deletes/clears the currently centered atom — behavior depends on its
+  // own depth:
+  // - depth 0 (a whole atom's root) has no "slot" to return to — it's
+  //   removed from the forest entirely, same as always, and we exit to
+  //   the dashboard.
+  // - depth 1 and depth 2 occupy a fixed 9-position auto-ring generated
+  //   once their parent was named (see ATOM_AUTO_MAX_DEPTH) — deleting
+  //   here must not shrink that grid, so instead of removing the node we
+  //   reset it back to a blank, unnamed slot (wiping title, shortTitle,
+  //   description, thoughts, and pruning every descendant), leaving its
+  //   position on the parent's orbit in place and empty.
+  // - depth 3+ live in a manually-grown list (the "+" tile adds one at a
+  //   time, unlimited, no fixed grid) — deleting here is a real removal,
+  //   same as it's always been.
+  // Either way (depth >= 1) we step back up to the parent's orbit view
+  // afterward, so the (now empty or now-shorter) result is visible.
   const handleDeleteNode = () => {
-    onDeleteNode(center.id);
     if (depth === 0) {
+      onDeleteNode(center.id);
       onHome();
-    } else {
-      setPath((p) => p.slice(0, -1));
-      resetLocalNav();
+      return;
     }
+    if (depth <= ATOM_AUTO_MAX_DEPTH + 1) {
+      onUpdateNode(center.id, (n) => ({ ...makeEmptyAtomNode(), id: n.id }));
+    } else {
+      onDeleteNode(center.id);
+    }
+    setPath((p) => p.slice(0, -1));
+    resetLocalNav();
   };
 
   // Unified pointer handling: a single pointer rotates the ring; a second
@@ -5073,9 +5090,13 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
           <ArrowLeft size={16} />
           {depth === 0 && t("Home")}
         </button>
-        <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
+        <button
+          onClick={() => setCardMode(true)}
+          className="truncate px-2 text-center flex-1"
+          style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}
+        >
           {center?.title || t("Дай мне имя")}
-        </h2>
+        </button>
         <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
       </div>
 
