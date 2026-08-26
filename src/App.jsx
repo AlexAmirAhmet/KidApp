@@ -379,12 +379,10 @@ const STRINGS = {
   "Промт для чат-бота": { en: "Prompt for the chatbot" },
   "Скопировать": { en: "Copy" },
   "Скопировано": { en: "Copied" },
-  "Текст целиком": { en: "Full text" },
-  "Покарточно": { en: "Cards" },
   "Текст": { en: "Text" },
   "Карточки": { en: "Cards" },
-  "Вставьте текст целиком, как прислал чат-бот": { en: "Paste the full text as sent by the chatbot" },
-  "Вставьте карточки построчно, как прислал чат-бот": { en: "Paste the cards line by line, as sent by the chatbot" },
+  "Ответ чат-бота": { en: "Chatbot reply" },
+  "Вставьте сюда весь ответ чат-бота целиком": { en: "Paste the chatbot's entire reply here" },
   "Нет карточек": { en: "No cards" },
   "Нет текста": { en: "No text" },
   "Удалить молитву": { en: "Delete prayer" },
@@ -5671,9 +5669,10 @@ function usePrayers() {
 // Builds the copy-paste prompt for an external chatbot: asks for the named
 // prayer's original text and a transcription in the chosen language, in two
 // clearly headed parts (a full scrollable text, then a numbered line-by-line
-// breakdown for the card format) so the user can copy each part back into
-// the two paste fields in PrayerSetupPanel by hand. Generated in whichever
-// language the app's own UI is currently in.
+// breakdown for the card format) so the whole reply can be pasted back as
+// one blob into PrayerSetupPanel's single field and auto-split by
+// parsePrayerReply. Generated in whichever language the app's own UI is
+// currently in.
 function buildPrayerPrompt(title, langKey, lang) {
   const langLabel = translate(lang, PRAYER_TRANSCRIPTION_LANGS.find((l) => l.key === langKey).label);
   if (lang === "en") {
@@ -5763,6 +5762,26 @@ function parsePrayerCards(raw) {
   return cards.filter((c) => c.text).map((c) => ({ id: uid(), text: c.text, transcription: c.transcription }));
 }
 
+// Splits the chatbot's single pasted-back reply into the two parts the
+// prompt asked for. Rather than trusting the exact marker wording (which
+// can come back in either language, a different case, or get dropped by
+// the chatbot entirely), this uses the same structural cue parsePrayerCards
+// itself relies on: the line-by-line part always starts at the first
+// numbered line ("1. ..."), so everything before that is the whole-text
+// part and everything from there on is raw material for parsePrayerCards.
+// Marker lines are stripped first so they never end up in either part.
+function parsePrayerReply(raw) {
+  const numberRe = /^\d+[.)]\s*/;
+  const lines = stripMarkerLines(raw).split("\n");
+  const firstNumberedIndex = lines.findIndex((line) => numberRe.test(line.trim()));
+  const fullTextLines = firstNumberedIndex === -1 ? lines : lines.slice(0, firstNumberedIndex);
+  const cardsRawLines = firstNumberedIndex === -1 ? [] : lines.slice(firstNumberedIndex);
+  return {
+    fullText: fullTextLines.join("\n").trim(),
+    cards: parsePrayerCards(cardsRawLines.join("\n")),
+  };
+}
+
 function PrayerCreateScreen({ onCancel, onSave }) {
   const PALETTE = useTheme();
   const t = useT();
@@ -5828,16 +5847,19 @@ function PrayerCreateScreen({ onCancel, onSave }) {
   );
 }
 
-// Step-by-step setup: the generated prompt (readonly, with its own Copy
-// button) plus two independent paste-back fields, each with its own Save —
-// the user can fill in one part now and the other later, in either order.
-function PrayerSetupPanel({ prayer, onSaveFullText, onSaveCards }) {
+// Setup: the generated prompt (readonly, with its own Copy button) plus a
+// single paste-back field for the chatbot's whole two-part reply — parsed
+// and split into fullText + cards by parsePrayerReply on the single Save.
+function PrayerSetupPanel({ prayer, onSave }) {
   const PALETTE = useTheme();
   const t = useT();
   const [lang] = useLanguage();
   const [copied, setCopied] = useState(false);
-  const [fullTextDraft, setFullTextDraft] = useState(prayer.fullText);
-  const [cardsDraft, setCardsDraft] = useState(prayer.cards.map((c) => `${c.text} - ${c.transcription}`).join("\n"));
+  const [replyDraft, setReplyDraft] = useState(() => {
+    if (prayer.fullText) return prayer.fullText;
+    if (prayer.cards.length) return prayer.cards.map((c) => `${c.text} - ${c.transcription}`).join("\n");
+    return "";
+  });
 
   const prompt = useMemo(
     () => buildPrayerPrompt(prayer.title, prayer.transcriptionLang, lang),
@@ -5880,39 +5902,18 @@ function PrayerSetupPanel({ prayer, onSaveFullText, onSaveCards }) {
 
       <div>
         <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          {t("Текст целиком")}
+          {t("Ответ чат-бота")}
         </p>
         <textarea
-          value={fullTextDraft}
-          onChange={(e) => setFullTextDraft(e.target.value)}
-          placeholder={t("Вставьте текст целиком, как прислал чат-бот")}
-          rows={6}
+          value={replyDraft}
+          onChange={(e) => setReplyDraft(e.target.value)}
+          placeholder={t("Вставьте сюда весь ответ чат-бота целиком")}
+          rows={12}
           className="w-full rounded-2xl p-4 outline-none resize-none"
           style={textareaStyle}
         />
         <button
-          onClick={() => onSaveFullText(stripMarkerLines(fullTextDraft))}
-          className="w-full mt-3 py-2.5 rounded-full"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
-        >
-          {t("Сохранить")}
-        </button>
-      </div>
-
-      <div>
-        <p className="text-xs uppercase tracking-wide mb-2" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          {t("Покарточно")}
-        </p>
-        <textarea
-          value={cardsDraft}
-          onChange={(e) => setCardsDraft(e.target.value)}
-          placeholder={t("Вставьте карточки построчно, как прислал чат-бот")}
-          rows={8}
-          className="w-full rounded-2xl p-4 outline-none resize-none"
-          style={textareaStyle}
-        />
-        <button
-          onClick={() => onSaveCards(parsePrayerCards(cardsDraft))}
+          onClick={() => onSave(parsePrayerReply(replyDraft))}
           className="w-full mt-3 py-2.5 rounded-full"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
         >
@@ -6079,8 +6080,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
       {editing || !hasContent ? (
         <PrayerSetupPanel
           prayer={prayer}
-          onSaveFullText={(fullText) => onUpdate(prayer.id, { fullText })}
-          onSaveCards={(cards) => onUpdate(prayer.id, { cards })}
+          onSave={({ fullText, cards }) => onUpdate(prayer.id, { fullText, cards })}
         />
       ) : (
         <>
