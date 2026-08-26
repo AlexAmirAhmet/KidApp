@@ -39,6 +39,7 @@ import {
   Keyboard,
   BookHeart,
   Home,
+  RefreshCw,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -181,6 +182,7 @@ const STRINGS = {
   "Отмена": { en: "Cancel" },
   "Назад": { en: "Back" },
   "Home": { en: "Home" },
+  "Обновить": { en: "Refresh" },
   "Да": { en: "Yes" },
   "Удалить": { en: "Delete" },
   "Редактировать": { en: "Edit" },
@@ -2874,15 +2876,37 @@ function PagesFormScreen({ initial, onCancel, onSave, titlePlaceholder, bodyPlac
 // A flat list of {id, title, body} documents with create/edit/delete — backs
 // both the Pages dashboard and the Слово dashboard, which only differ in
 // copy and icon.
-function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, createLabel, rowIcon: RowIcon = BookOpen }) {
+function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, createLabel, rowIcon: RowIcon = BookOpen, onRefresh }) {
   const PALETTE = useTheme();
   const t = useT();
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [refreshSpin, setRefreshSpin] = useState(false);
   const resolvedEmptyText = emptyText ?? t("Текстов пока нет. Вставь первый — абзацы, отрывки, что угодно длинное.");
   const resolvedCreateLabel = createLabel ?? t("Добавить текст");
 
+  const handleRefresh = () => {
+    onRefresh();
+    setRefreshSpin(true);
+    setTimeout(() => setRefreshSpin(false), 500);
+  };
+
   return (
     <div className="w-full max-w-md px-6 pt-8">
+      {/* Only passed in for the Молитвы dashboard — the explicit, on-demand
+          replacement for pull-to-refresh there, not a general list-refresh
+          affordance every PagesList-based dashboard should show. */}
+      {onRefresh && (
+        <div className="flex justify-end mb-3">
+          <button
+            onClick={handleRefresh}
+            aria-label={t("Обновить")}
+            className="w-9 h-9 rounded-full flex items-center justify-center"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
+          >
+            <RefreshCw size={16} style={{ transition: "transform 0.5s ease", transform: refreshSpin ? "rotate(360deg)" : "rotate(0deg)" }} />
+          </button>
+        </div>
+      )}
       {texts.length === 0 ? (
         <div className="flex flex-col items-center gap-6 py-10">
           <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
@@ -5647,23 +5671,26 @@ function BasmalaWatermark() {
 function usePrayers() {
   const [prayers, setPrayers] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("prayers-v1", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setPrayers(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet
+  // Re-reads prayers-v1 from storage into state. Exposed as `refresh` for
+  // the dashboard's manual "Обновить" button — the explicit, on-demand
+  // replacement for the pull-to-refresh gesture, which this app no longer
+  // treats as a page reload (see the app-nav-v1 navigation persistence)
+  // and so has nothing left for a swipe to usefully trigger.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("prayers-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setPrayers(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setPrayers(next);
@@ -5699,7 +5726,7 @@ function usePrayers() {
     [prayers, persist]
   );
 
-  return { prayers, addPrayer, updatePrayer, deletePrayer };
+  return { prayers, addPrayer, updatePrayer, deletePrayer, refresh };
 }
 
 // One short, unambiguous description of the transcription alphabet per
@@ -6301,7 +6328,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
         />
       ) : (
         <>
-          <div className="flex justify-center gap-2 pb-4 shrink-0">
+          <div className="flex justify-center gap-2 pb-10 shrink-0">
             {[
               { key: "text", label: t("Текст") },
               { key: "cards", label: t("Карточки") },
@@ -6377,7 +6404,7 @@ export default function App() {
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
   const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomForest();
-  const { prayers, addPrayer, updatePrayer, deletePrayer } = usePrayers();
+  const { prayers, addPrayer, updatePrayer, deletePrayer, refresh: refreshPrayers } = usePrayers();
   const [mode, setMode] = useState("language");
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -6750,6 +6777,7 @@ export default function App() {
                 emptyText={t("Молитв пока нет. Добавь первую.")}
                 createLabel={t("Добавить молитву")}
                 rowIcon={BookHeart}
+                onRefresh={refreshPrayers}
               />
             ) : (
               <PagesList
