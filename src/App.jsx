@@ -38,6 +38,7 @@ import {
   Mic,
   Keyboard,
   BookHeart,
+  Home,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -69,6 +70,13 @@ const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraun
 @keyframes atomPulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
+}
+@keyframes homeButtonBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.home-button-bounce svg {
+  animation: homeButtonBounce 2.2s ease-in-out infinite;
 }`;
 
 // Neumorphic surfaces: page, cards, and chips all share one base tone per
@@ -430,6 +438,32 @@ function ThemeToggle({ isDark, onToggle, size = 15 }) {
       style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
     >
       {isDark ? <Sun size={size} /> : <Moon size={size} />}
+    </button>
+  );
+}
+
+// Icon-only "back to this section's dashboard" button, fixed to a
+// constant on-screen position so it's always reachable without scrolling
+// — replaces every screen's former in-flow "← Home" text button.
+function HomeButton({ onClick }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  return (
+    <button
+      onClick={onClick}
+      aria-label={t("Home")}
+      className="fixed z-40 flex items-center justify-center rounded-full home-button-bounce"
+      style={{
+        top: "calc(env(safe-area-inset-top, 0px) + 20px)",
+        left: "calc(env(safe-area-inset-left, 0px) + 16px)",
+        width: "42px",
+        height: "42px",
+        background: PALETTE.card,
+        color: PALETTE.fadeText,
+        boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
+      }}
+    >
+      <Home size={18} />
     </button>
   );
 }
@@ -1371,16 +1405,9 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
 
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <HomeButton onClick={onBack} />
       <div className="max-w-md mx-auto w-full px-6 pt-8">
-        <div className="flex items-center justify-between mb-2">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1 text-sm"
-            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
-          >
-            <ArrowLeft size={16} /> {t("Home")}
-          </button>
-
+        <div className="flex items-center justify-end mb-2">
           <div className="flex items-center gap-2">
             {!renaming && (
               <>
@@ -2052,11 +2079,9 @@ function GoalHome({ goal, onBack, onRename, onDelete, onSetChildren, isDark, onT
 
   return (
     <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <HomeButton onClick={onBack} />
       <div className="max-w-md mx-auto w-full px-6 pt-8">
-        <div className="flex items-center justify-between mb-2">
-          <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-            <ArrowLeft size={16} /> {t("Home")}
-          </button>
+        <div className="flex items-center justify-end mb-2">
           <div className="flex items-center gap-2">
             {!renaming && (
               <>
@@ -2467,11 +2492,9 @@ function PagesReader({ text, onBack, isDark, onToggleTheme }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: PALETTE.bg }}>
+      <HomeButton onClick={onBack} />
       <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between shrink-0">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> {t("Home")}
-        </button>
-        <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
+        <h2 className="truncate px-2 flex-1 text-center" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem" }}>
           {text.title}
         </h2>
         <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
@@ -2745,15 +2768,15 @@ function WordView({ text, onBack, isDark, onToggleTheme }) {
   const goToParent = () => setOpenCardIndex(null);
 
   const header = (
-    <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
-      <button onClick={onBack} className="flex items-center gap-1 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-        <ArrowLeft size={16} /> {t("Home")}
-      </button>
-      <h2 className="truncate px-2" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem", maxWidth: "180px" }}>
-        {text.title}
-      </h2>
-      <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
-    </div>
+    <>
+      <HomeButton onClick={onBack} />
+      <div className="max-w-md mx-auto w-full px-6 pt-8 flex items-center justify-between">
+        <h2 className="truncate px-2 flex-1 text-center" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.1rem" }}>
+          {text.title}
+        </h2>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+    </>
   );
 
   const tree = tabs.length > 0 && (
@@ -3668,14 +3691,12 @@ function VideoPlayerScreen({ video, onBack, isDark, onToggleTheme }) {
 
   return (
     <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      <HomeButton onClick={onBack} />
       {/* Compact mode should have no wasted air: the header itself shrinks
           its own top/bottom padding once the video collapses, instead of
           keeping the same generous spacing that only makes sense when the
           video is actually visible below it. */}
       <div className={`max-w-md mx-auto w-full px-6 flex items-center justify-between shrink-0 ${isAudioMode ? "pt-3 pb-1" : "pt-8 pb-2"}`}>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          <ArrowLeft size={16} /> {t("Home")}
-        </button>
         <h2 className="truncate px-2 text-center flex-1" style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.05rem" }}>
           {video.title}
         </h2>
@@ -5102,16 +5123,20 @@ function AtomTreeScreen({ root, onUpdateNode, onDeleteNode, onHome, isDark, onTo
 
   return (
     <div className="h-screen flex flex-col" style={{ background: PALETTE.bg }}>
+      {depth === 0 && <HomeButton onClick={handleBack} />}
       <div className="max-w-md mx-auto w-full px-6 pt-8 pb-2 flex items-center justify-between shrink-0">
-        <button
-          onClick={handleBack}
-          aria-label={depth === 0 ? t("Home") : t("Назад")}
-          className="flex items-center gap-1 text-sm shrink-0"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
-        >
-          <ArrowLeft size={16} />
-          {depth === 0 && t("Home")}
-        </button>
+        {depth === 0 ? (
+          <div className="shrink-0" style={{ width: "16px" }} />
+        ) : (
+          <button
+            onClick={handleBack}
+            aria-label={t("Назад")}
+            className="flex items-center gap-1 text-sm shrink-0"
+            style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+        )}
         <button
           onClick={() => setCardMode(true)}
           className="truncate px-2 text-center flex-1"
@@ -5690,46 +5715,64 @@ function usePrayers() {
 // currently in.
 function buildPrayerPrompt(title, langKey, lang) {
   const langLabel = translate(lang, PRAYER_TRANSCRIPTION_LANGS.find((l) => l.key === langKey).label);
+  const cyrillicExample = langKey === "ru";
   if (lang === "en") {
+    const cyrillicRule = cyrillicExample
+      ? `\nIMPORTANT: Use ONLY Cyrillic (Russian) characters for the transcription. NEVER use Latin/English letters for transcription, even for proper names or religious terms.\n`
+      : "";
     return `Please give me the text of the prayer "${title}" in two clearly labeled parts, as plain text only (no JSON, no Markdown formatting).
-
+${cyrillicRule}
 === FULL TEXT ===
 The original text of the whole prayer, then a blank line, then a transcription of the whole prayer in ${langLabel}.
 
 === LINE BY LINE ===
-The same prayer split into numbered lines. For each line, exactly one line in this format:
+The same prayer split into numbered lines. Each line MUST start with its number followed by a period, on its own paragraph — never merge multiple numbered lines together, never omit the number. For each line, exactly one line in this format:
 N. original line text - transcription of that line in ${langLabel}
 
 Example:
-1. بِسْمِ اللَّهِ - Bismillahi
-2. الرَّحْمَٰنِ الرَّحِيمِ - Rahmani Rahim
+1. بِسْمِ اللَّهِ - ${cyrillicExample ? "Бисмилля" : "Bismillahi"}
+2. الرَّحْمَٰنِ الرَّحِيمِ - ${cyrillicExample ? "Рахмани рахим" : "Rahmani Rahim"}
 
-Reply using only this format, with the two header lines "=== FULL TEXT ===" and "=== LINE BY LINE ===", nothing else added.`;
+The header lines "=== FULL TEXT ===" and "=== LINE BY LINE ===" must appear ONLY on their own separate line, marking the start of each section — never insert them in the middle of the prayer text under any circumstances.
+
+Reply using only this format, with exactly these two header lines, nothing else added.`;
   }
+  const cyrillicRule = cyrillicExample
+    ? `\nВАЖНО: транскрипция должна быть написана ТОЛЬКО кириллицей (русскими буквами). НИКОГДА не используй латинские/английские буквы в транскрипции, даже для имён собственных или религиозных терминов.\n`
+    : "";
   return `Пришли текст молитвы «${title}» в двух чётко размеченных частях, строго обычным текстом (без JSON и без Markdown-разметки).
-
+${cyrillicRule}
 === ТЕКСТ ЦЕЛИКОМ ===
 Оригинальный текст молитвы целиком, затем пустая строка, затем — транскрипция всей молитвы целиком на языке: ${langLabel}.
 
 === ПОКАРТОЧНО ===
-Та же молитва, разбитая на пронумерованные строки. Для каждой строки — ровно одна строка в формате:
+Та же молитва, разбитая на пронумерованные строки. Каждая строка ОБЯЗАТЕЛЬНО должна начинаться с номера и точки, на отдельном абзаце — никогда не объединяй несколько пронумерованных строк вместе, никогда не пропускай номер. Для каждой строки — ровно одна строка в формате:
 N. оригинальный текст строки - транскрипция строки на ${langLabel}
 
 Пример:
-1. بِسْمِ اللَّهِ - Bismillâhi
-2. الرَّحْمَٰنِ الرَّحِيمِ - Rahmâni Rahîm
+1. بِسْمِ اللَّهِ - ${cyrillicExample ? "Бисмилля" : "Bismillâhi"}
+2. الرَّحْمَٰنِ الرَّحِيمِ - ${cyrillicExample ? "Рахмани рахим" : "Rahmâni Rahîm"}
 
-Верни ответ только в этом виде, с двумя заголовками «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===», без ничего лишнего.`;
+Заголовки «=== ТЕКСТ ЦЕЛИКОМ ===» и «=== ПОКАРТОЧНО ===» должны стоять ТОЛЬКО каждый на своей отдельной строке, обозначая начало соответствующей части — никогда не вставляй их внутрь текста молитвы ни при каких обстоятельствах.
+
+Верни ответ только в этом виде, с этими двумя заголовками, без ничего лишнего.`;
 }
 
 // Strips the "=== ... ===" section-header lines the prompt above asks the
 // chatbot to use (in whichever language/casing it echoes them back) — they
 // exist only to mark where to split the reply, never to be shown to the
 // user, so any pasted-back text runs through this before being saved.
+// Removes "=== ... ===" section markers wherever they appear in a line —
+// as the whole line (the documented case) or spliced into the middle of
+// it (chatbots sometimes ignore the "own separate line" instruction and
+// run a marker straight into the surrounding text). Either way the
+// marker substring is dropped and the remaining text is glued back
+// together with a single space so words don't get fused.
 function stripMarkerLines(raw) {
   return raw
     .split("\n")
-    .filter((line) => !/^\s*=+[^=]*=+\s*$/.test(line))
+    .map((line) => line.replace(/=+[^=\n]*=+/g, " ").replace(/[ \t]{2,}/g, " ").trim())
+    .filter(Boolean)
     .join("\n")
     .trim();
 }
@@ -5738,6 +5781,43 @@ function stripMarkerLines(raw) {
 // always Latin/Cyrillic (LTR). Used both to group raw pasted-back lines
 // (parsePrayerCards) and to align rendered text correctly (PrayerTextView).
 const isArabicScript = (s) => /[؀-ۿ]/.test(s);
+
+// Best-effort Latin -> Cyrillic transliteration for prayer transcriptions,
+// covering the common digraphs/letters used in existing Russian renderings
+// of Arabic terms (e.g. "Rahman" -> "Рахман", "khutba" -> "хутба"). Not a
+// linguistically exhaustive transliteration engine — just enough to
+// recover when a chatbot defaults to Latin letters despite being asked
+// for Cyrillic-only transcription, which happens often enough in
+// practice to be worth handling automatically rather than leaving the
+// user to redo the whole reply. Untouched (Cyrillic, Arabic, digits,
+// punctuation) characters pass through unchanged, so it's safe to run
+// even on text that's already correct.
+const LATIN_TO_CYRILLIC_DIGRAPHS = [
+  ["sh", "ш"], ["ch", "ч"], ["kh", "х"], ["gh", "г"], ["th", "с"], ["dh", "з"],
+  ["zh", "ж"], ["ph", "ф"], ["ya", "я"], ["yu", "ю"], ["ye", "е"],
+  ["aa", "а"], ["ii", "и"], ["ee", "и"], ["uu", "у"], ["oo", "у"],
+];
+const LATIN_TO_CYRILLIC_LETTERS = {
+  a: "а", b: "б", c: "к", d: "д", e: "е", f: "ф", g: "г", h: "х", i: "и",
+  j: "дж", k: "к", l: "л", m: "м", n: "н", o: "о", p: "п", q: "к", r: "р",
+  s: "с", t: "т", u: "у", v: "в", w: "в", x: "кс", y: "й", z: "з", "'": "ъ",
+};
+function transliterateLatinToCyrillic(text) {
+  if (!/[A-Za-z]/.test(text)) return text;
+  const lower = text.toLowerCase();
+  let result = "";
+  for (let i = 0; i < lower.length; ) {
+    const digraph = LATIN_TO_CYRILLIC_DIGRAPHS.find(([latin]) => lower.startsWith(latin, i));
+    if (digraph) {
+      result += digraph[1];
+      i += 2;
+      continue;
+    }
+    result += LATIN_TO_CYRILLIC_LETTERS[lower[i]] ?? lower[i];
+    i += 1;
+  }
+  return result.replace(/(^|\s)([а-яё])/g, (m, sep, letter) => sep + letter.toUpperCase());
+}
 
 // Parses the "N. original - transcription" lines the prompt above asks the
 // chatbot to return, using the same "text - translation" delimiter
@@ -5748,7 +5828,7 @@ const isArabicScript = (s) => /[؀-ۿ]/.test(s);
 // forms are grouped into a single card per numbered line here, so the
 // card count always matches the number of verses, not the number of
 // raw text lines.
-function parsePrayerCards(raw) {
+function parsePrayerCards(raw, transcriptionLang) {
   const numberRe = /^\d+[.)]\s*/;
   const lines = stripMarkerLines(raw)
     .split("\n")
@@ -5778,26 +5858,59 @@ function parsePrayerCards(raw) {
     }
   }
   if (current) cards.push(current);
-  return cards.filter((c) => c.text).map((c) => ({ id: uid(), text: c.text, transcription: c.transcription }));
+
+  let result = cards.filter((c) => c.text);
+  // Fallback for a reply that dropped the numbering format entirely: the
+  // loop above never opens a card without a numbered line, so every line
+  // gets skipped and result stays empty even though the lines still look
+  // like recognizable "original - transcription" pairs. Recover what we
+  // can rather than leaving Карточки empty.
+  if (result.length === 0) {
+    result = lines
+      .map((line) => {
+        const parts = line.split(/\s-\s|=|—/).map((p) => p.trim()).filter(Boolean);
+        return parts.length > 1 ? { text: parts[0], transcription: parts.slice(1).join(" - ") } : null;
+      })
+      .filter(Boolean);
+  }
+
+  return result.map((c) => ({
+    id: uid(),
+    text: c.text,
+    transcription: transcriptionLang === "ru" ? transliterateLatinToCyrillic(c.transcription) : c.transcription,
+  }));
 }
 
 // Splits the chatbot's single pasted-back reply into the two parts the
-// prompt asked for. Rather than trusting the exact marker wording (which
-// can come back in either language, a different case, or get dropped by
-// the chatbot entirely), this uses the same structural cue parsePrayerCards
-// itself relies on: the line-by-line part always starts at the first
-// numbered line ("1. ..."), so everything before that is the whole-text
-// part and everything from there on is raw material for parsePrayerCards.
-// Marker lines are stripped first so they never end up in either part.
-function parsePrayerReply(raw) {
+// prompt asked for. The marker headers themselves are the primary split
+// signal (that's their whole purpose) — found here BEFORE stripMarkerLines
+// runs, so the split still works even if the line-by-line section's
+// numbering is broken or missing entirely. Only when no second marker can
+// be found at all does this fall back to the numbered-line heuristic
+// parsePrayerCards itself also relies on.
+function parsePrayerReply(raw, transcriptionLang) {
   const numberRe = /^\d+[.)]\s*/;
-  const lines = stripMarkerLines(raw).split("\n");
-  const firstNumberedIndex = lines.findIndex((line) => numberRe.test(line.trim()));
-  const fullTextLines = firstNumberedIndex === -1 ? lines : lines.slice(0, firstNumberedIndex);
-  const cardsRawLines = firstNumberedIndex === -1 ? [] : lines.slice(firstNumberedIndex);
+  const rawLines = raw.split("\n");
+  const markerIndices = rawLines.reduce((acc, line, i) => {
+    if (/^\s*=+[^=\n]*=+\s*$/.test(line)) acc.push(i);
+    return acc;
+  }, []);
+  let splitIndex;
+  if (markerIndices.length >= 2) {
+    splitIndex = markerIndices[1];
+  } else {
+    const firstNumbered = rawLines.findIndex((line) => numberRe.test(line.trim()));
+    splitIndex = firstNumbered === -1 ? rawLines.length : firstNumbered;
+  }
+  const fullTextLines = stripMarkerLines(rawLines.slice(0, splitIndex).join("\n")).split("\n");
+  const cardsRawLines = stripMarkerLines(rawLines.slice(splitIndex).join("\n")).split("\n");
+  const fullText = fullTextLines
+    .map((line) => (transcriptionLang === "ru" && !isArabicScript(line) ? transliterateLatinToCyrillic(line) : line))
+    .join("\n")
+    .trim();
   return {
-    fullText: fullTextLines.join("\n").trim(),
-    cards: parsePrayerCards(cardsRawLines.join("\n")),
+    fullText,
+    cards: parsePrayerCards(cardsRawLines.join("\n"), transcriptionLang),
   };
 }
 
@@ -5937,7 +6050,7 @@ function PrayerSetupPanel({ prayer, onSave }) {
 
       <div className="shrink-0 px-6 pt-3 pb-6 max-w-md mx-auto w-full">
         <button
-          onClick={() => onSave(parsePrayerReply(replyDraft))}
+          onClick={() => onSave(parsePrayerReply(replyDraft, prayer.transcriptionLang))}
           className="w-full py-2.5 rounded-full"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.chip, color: PALETTE.mint }}
         >
@@ -6157,7 +6270,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
               </button>
             ))}
           </div>
-          <div className="px-6 pb-4 max-w-md mx-auto w-full shrink-0">
+          <div className="px-6 pb-10 max-w-md mx-auto w-full shrink-0">
             <BasmalaWatermark />
           </div>
           {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} /> : <PrayerCardsView cards={prayer.cards} />}

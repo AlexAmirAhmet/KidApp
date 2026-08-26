@@ -8,4 +8,13 @@ body,
 
 body {
   margin: 0;
+  /* Disables the browser's native pull-to-refresh gesture, which is a
+     real page reload — it remounts the whole app, and per-item navigation
+     state (which deck/goal/prayer/etc. was open) isn't persisted, so a
+     reload always lands back on that section's dashboard regardless of
+     where the pull happened. There's no server to refresh data from here
+     (state lives in localStorage and is already current), so the correct
+     fix is to not let the gesture reload the page at all — normal
+     scrolling inside the page is unaffected. */
+  overscroll-behavior-y: contain;
 }
