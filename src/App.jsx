@@ -388,7 +388,6 @@ const STRINGS = {
   "Нет карточек": { en: "No cards" },
   "Нет текста": { en: "No text" },
   "Удалить молитву": { en: "Delete prayer" },
-  "тап — перевернуть": { en: "tap to flip" },
 };
 
 // t("Русский ключ") -> localized string; t("шаблон с N", n) -> localized,
@@ -5711,22 +5710,45 @@ N. оригинальный текст строки - транскрипция �
 
 // Parses the "N. original - transcription" lines the prompt above asks the
 // chatbot to return, using the same "text - translation" delimiter
-// convention as parseCardLine elsewhere in the app (" - ", "=", or "—"),
-// after stripping the leading line number.
+// convention as parseCardLine elsewhere in the app (" - ", "=", or "—").
+// Real chatbot replies don't always keep original+transcription on one
+// line despite the prompt asking for it — some put the original on the
+// numbered line and the transcription on the next line instead. Both
+// forms are grouped into a single card per numbered line here, so the
+// card count always matches the number of verses, not the number of
+// raw text lines.
 function parsePrayerCards(raw) {
-  return raw
+  const isArabicScript = (s) => /[؀-ۿ]/.test(s);
+  const numberRe = /^\d+[.)]\s*/;
+  const lines = raw
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const withoutNumber = line.replace(/^\d+[.)]\s*/, "");
-      const parts = withoutNumber
-        .split(/\s-\s|=|—/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-      return { id: uid(), text: parts[0] || withoutNumber, transcription: parts[1] || "" };
-    })
-    .filter((c) => c.text);
+    .filter(Boolean);
+  const cards = [];
+  let current = null;
+  for (let line of lines) {
+    if (numberRe.test(line)) {
+      if (current) cards.push(current);
+      current = { text: "", transcription: "" };
+      line = line.replace(numberRe, "");
+    }
+    if (!current) continue;
+    const parts = line.split(/\s-\s|=|—/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      current.text = current.text || parts[0];
+      current.transcription = current.transcription
+        ? `${current.transcription} ${parts.slice(1).join(" - ")}`
+        : parts.slice(1).join(" - ");
+      continue;
+    }
+    if (!current.text || (isArabicScript(line) && !current.transcription)) {
+      current.text = current.text ? `${current.text} ${line}` : line;
+    } else {
+      current.transcription = current.transcription ? `${current.transcription} ${line}` : line;
+    }
+  }
+  if (current) cards.push(current);
+  return cards.filter((c) => c.text).map((c) => ({ id: uid(), text: c.text, transcription: c.transcription }));
 }
 
 function PrayerCreateScreen({ onCancel, onSave }) {
@@ -5908,17 +5930,17 @@ function PrayerTextView({ fullText }) {
   );
 }
 
-function PrayerCard({ card, flipped, onFlip }) {
+function PrayerCard({ card, number }) {
   const PALETTE = useTheme();
   const t = useT();
   return (
-    <div onClick={onFlip} className="relative w-full max-w-md cursor-pointer" style={{ perspective: "1200px" }}>
+    <div className="relative w-full max-w-md">
       <div
         className="absolute inset-0 rounded-2xl"
         style={{ background: PALETTE.cardEdge, transform: "rotate(2deg) translateY(6px)", boxShadow: `4px 4px 10px ${PALETTE.shadowDark}` }}
       />
       <div
-        className="relative rounded-2xl px-8 py-14 flex flex-col items-center justify-center text-center"
+        className="relative rounded-2xl px-8 py-10 flex flex-col items-center justify-center text-center gap-4"
         style={{
           background: PALETTE.card,
           minHeight: "220px",
@@ -5926,15 +5948,23 @@ function PrayerCard({ card, flipped, onFlip }) {
           border: `1px solid ${PALETTE.cardEdge}`,
         }}
       >
-        {!flipped ? (
-          <p style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.6rem", lineHeight: 1.4 }}>{card.text}</p>
-        ) : (
-          <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.2rem", lineHeight: 1.4 }}>
-            {card.transcription || t("нет транскрипции")}
-          </p>
-        )}
-        <p className="absolute bottom-4 text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#AEB8BE" }}>
-          {t("тап — перевернуть")}
+        <span
+          className="flex items-center justify-center rounded-full"
+          style={{
+            width: "26px",
+            height: "26px",
+            background: PALETTE.mustard,
+            color: PALETTE.bgDeep,
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+          }}
+        >
+          {number}
+        </span>
+        <p style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4 }}>{card.text}</p>
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4 }}>
+          {card.transcription || t("нет транскрипции")}
         </p>
       </div>
     </div>
@@ -5945,7 +5975,6 @@ function PrayerCardsView({ cards }) {
   const PALETTE = useTheme();
   const t = useT();
   const [index, setIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
 
   if (cards.length === 0) {
     return (
@@ -5954,16 +5983,14 @@ function PrayerCardsView({ cards }) {
       </p>
     );
   }
-  const card = cards[Math.min(index, cards.length - 1)];
+  const clampedIndex = Math.min(index, cards.length - 1);
+  const card = cards[clampedIndex];
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 gap-6">
-      <PrayerCard card={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} />
+      <PrayerCard card={card} number={clampedIndex + 1} />
       <div className="flex items-center gap-6">
         <button
-          onClick={() => {
-            setIndex((i) => Math.max(0, i - 1));
-            setFlipped(false);
-          }}
+          onClick={() => setIndex((i) => Math.max(0, i - 1))}
           disabled={index === 0}
           className="disabled:opacity-30"
           style={{ color: PALETTE.fadeText }}
@@ -5974,10 +6001,7 @@ function PrayerCardsView({ cards }) {
           {index + 1} / {cards.length}
         </span>
         <button
-          onClick={() => {
-            setIndex((i) => Math.min(cards.length - 1, i + 1));
-            setFlipped(false);
-          }}
+          onClick={() => setIndex((i) => Math.min(cards.length - 1, i + 1))}
           disabled={index === cards.length - 1}
           className="disabled:opacity-30"
           style={{ color: PALETTE.fadeText }}
