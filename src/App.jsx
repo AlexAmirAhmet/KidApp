@@ -65,7 +65,7 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 
-const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Katibeh&display=swap');
 @keyframes atomPulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
@@ -5608,6 +5608,21 @@ const PRAYER_TRANSCRIPTION_LANGS = [
   { key: "tr", label: "Турецкий" },
 ];
 
+// Static decorative element for the Молитвы design system — not user
+// content, always shown regardless of whether any prayer exists yet.
+function BasmalaWatermark() {
+  const PALETTE = useTheme();
+  return (
+    <p
+      dir="rtl"
+      className="w-full text-center"
+      style={{ fontFamily: "'Katibeh', serif", color: PALETTE.ink, fontSize: "1.8rem", lineHeight: 1.3 }}
+    >
+      بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+    </p>
+  );
+}
+
 function usePrayers() {
   const [prayers, setPrayers] = useState([]);
 
@@ -5999,10 +6014,10 @@ function PrayerCard({ card, number }) {
         >
           {number}
         </span>
-        <p dir="rtl" className="w-full" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4, textAlign: "right" }}>
+        <p dir="rtl" className="w-full" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4, textAlign: "center" }}>
           {card.text}
         </p>
-        <p dir="ltr" className="w-full" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4, textAlign: "left" }}>
+        <p className="w-full" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4, textAlign: "center" }}>
           {card.transcription || t("нет транскрипции")}
         </p>
       </div>
@@ -6142,6 +6157,9 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
               </button>
             ))}
           </div>
+          <div className="px-6 pb-4 max-w-md mx-auto w-full shrink-0">
+            <BasmalaWatermark />
+          </div>
           {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} /> : <PrayerCardsView cards={prayer.cards} />}
         </>
       )}
@@ -6280,6 +6298,14 @@ export default function App() {
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", theme.bg);
+    // body itself has no background of its own (see index.css) — any
+    // screen whose fixed-height container comes up even a pixel short of
+    // the real device viewport (a keyboard-open/close transition frame,
+    // a visualViewport resize event that fires late, etc.) exposes the
+    // browser's default white page background through the gap. Keeping
+    // body's background locked to the current theme means that gap reads
+    // as "our own background", not a stray white/blank area.
+    document.body.style.background = theme.bg;
   }, [theme.bg]);
 
   const changeMode = (next) => {
@@ -6463,6 +6489,12 @@ export default function App() {
             </div>
 
             <ModeSwitch mode={mode} onChange={changeMode} />
+
+            {mode === "prayers" && (
+              <div className="w-full max-w-lg px-4 pt-6 pb-2">
+                <BasmalaWatermark />
+              </div>
+            )}
 
             {mode === "language" ? (
               <LanguageDashboard decks={decks} onOpen={setOpenDeckId} onAddDeck={addDeck} />
