@@ -183,6 +183,9 @@ const STRINGS = {
   "Назад": { en: "Back" },
   "Home": { en: "Home" },
   "Обновить": { en: "Refresh" },
+  "Размер текста": { en: "Text size" },
+  "Уменьшить размер текста": { en: "Decrease text size" },
+  "Увеличить размер текста": { en: "Increase text size" },
   "Да": { en: "Yes" },
   "Удалить": { en: "Delete" },
   "Редактировать": { en: "Edit" },
@@ -6168,9 +6171,26 @@ function PrayerTextView({ fullText, cards }) {
   );
 }
 
-function PrayerCard({ card, number }) {
+// Five discrete text-size steps for the card's Arabic/transcription text,
+// centered on step 3 (index 2) — the size the cards always used before this
+// control existed, kept as the anchor so the adjustment reads as "bigger"
+// or "smaller than normal" rather than an arbitrary new default. The range
+// is deliberately modest in both directions: step 1 stays comfortably
+// legible (shrinking text to help no one), and step 5 stays inside what
+// the card's fixed width can wrap without ugly breaks.
+const PRAYER_FONT_STEPS = [
+  { arabic: "1.2rem", translit: "0.9rem" },
+  { arabic: "1.35rem", translit: "1rem" },
+  { arabic: "1.5rem", translit: "1.1rem" },
+  { arabic: "1.7rem", translit: "1.25rem" },
+  { arabic: "1.9rem", translit: "1.4rem" },
+];
+const PRAYER_FONT_STEP_DEFAULT = 2;
+
+function PrayerCard({ card, number, fontStep }) {
   const PALETTE = useTheme();
   const t = useT();
+  const sizes = PRAYER_FONT_STEPS[fontStep];
   return (
     <div className="relative w-full max-w-md">
       <div
@@ -6200,10 +6220,10 @@ function PrayerCard({ card, number }) {
         >
           {number}
         </span>
-        <p dir="rtl" className="w-full" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.5rem", lineHeight: 1.4, textAlign: "center" }}>
+        <p dir="rtl" className="w-full" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: sizes.arabic, lineHeight: 1.4, textAlign: "center" }}>
           {card.text}
         </p>
-        <p className="w-full" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: "1.1rem", lineHeight: 1.4, textAlign: "center" }}>
+        <p className="w-full" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.mintDeep, fontSize: sizes.translit, lineHeight: 1.4, textAlign: "center" }}>
           {card.transcription || t("нет транскрипции")}
         </p>
       </div>
@@ -6215,6 +6235,7 @@ function PrayerCardsView({ cards }) {
   const PALETTE = useTheme();
   const t = useT();
   const [index, setIndex] = useState(0);
+  const [fontStep, setFontStep] = useState(PRAYER_FONT_STEP_DEFAULT);
 
   if (cards.length === 0) {
     return (
@@ -6232,12 +6253,22 @@ function PrayerCardsView({ cards }) {
     color: PALETTE.bgDeep,
     boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
   };
+  const fontStepButtonStyle = {
+    width: "38px",
+    height: "38px",
+    background: PALETTE.chip,
+    color: PALETTE.fadeText,
+    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+  };
   return (
     <div className="flex-1 min-h-0 flex flex-col items-center px-6">
-      <div className="flex-1 min-h-0 w-full flex items-center justify-center">
-        <PrayerCard card={card} number={clampedIndex + 1} />
+      {/* Card sits right under the Basmala (its gap comes from the
+          watermark wrapper above), top-aligned rather than centered, so
+          its height doesn't push the nav row or font control around. */}
+      <div className="w-full shrink-0 flex justify-center">
+        <PrayerCard card={card} number={clampedIndex + 1} fontStep={fontStep} />
       </div>
-      <div className="shrink-0 flex items-center gap-6 pb-6">
+      <div className="shrink-0 flex items-center" style={{ gap: "12px", marginTop: "26px" }}>
         <button
           onClick={() => setIndex((i) => (i - 1 + cards.length) % cards.length)}
           className="rounded-full flex items-center justify-center"
@@ -6257,6 +6288,52 @@ function PrayerCardsView({ cards }) {
         >
           <ChevronRight size={28} strokeWidth={2.5} />
         </button>
+      </div>
+
+      {/* Flexible spacer: whatever room is left (which varies with card
+          height) goes here, so the font-size control below always sits
+          pinned to the bottom of the screen instead of trailing the card. */}
+      <div className="flex-1 min-h-0" />
+
+      <div className="shrink-0 w-full flex flex-col items-center gap-2" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)" }}>
+        <span
+          className="uppercase"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.7rem", letterSpacing: "0.08em" }}
+        >
+          {t("Размер текста")}
+        </span>
+        <div className="flex items-center" style={{ gap: "12px" }}>
+          <button
+            onClick={() => setFontStep((s) => Math.max(0, s - 1))}
+            className="rounded-full flex items-center justify-center"
+            style={fontStepButtonStyle}
+            aria-label={t("Уменьшить размер текста")}
+          >
+            <Minus size={16} />
+          </button>
+          <div className="flex items-center gap-1.5">
+            {PRAYER_FONT_STEPS.map((_, i) => (
+              <span
+                key={i}
+                className="rounded-full"
+                style={{
+                  width: i === fontStep ? "18px" : "6px",
+                  height: "6px",
+                  background: i === fontStep ? PALETTE.mustard : PALETTE.cardEdge,
+                  transition: "width 0.2s ease, background 0.2s ease",
+                }}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => setFontStep((s) => Math.min(PRAYER_FONT_STEPS.length - 1, s + 1))}
+            className="rounded-full flex items-center justify-center"
+            style={fontStepButtonStyle}
+            aria-label={t("Увеличить размер текста")}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -6341,7 +6418,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
               </button>
             ))}
           </div>
-          <div className="px-6 pb-10 max-w-md mx-auto w-full shrink-0">
+          <div className="px-6 max-w-md mx-auto w-full shrink-0" style={{ paddingBottom: viewMode === "cards" ? "34px" : "40px" }}>
             <BasmalaWatermark />
           </div>
           {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} cards={prayer.cards} /> : <PrayerCardsView cards={prayer.cards} />}
