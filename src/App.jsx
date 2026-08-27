@@ -40,6 +40,7 @@ import {
   BookHeart,
   Home,
   RefreshCw,
+  History,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -193,6 +194,8 @@ const STRINGS = {
   "Home": { en: "Home" },
   "Обновить": { en: "Refresh" },
   "Размер текста": { en: "Text size" },
+  "Продолжать с последней карточки": { en: "Resume from last card" },
+  "Всегда начинать с первой карточки": { en: "Always start from the first card" },
   "Уменьшить размер текста": { en: "Decrease text size" },
   "Увеличить размер текста": { en: "Increase text size" },
   "Да": { en: "Yes" },
@@ -6138,7 +6141,84 @@ function PrayerSetupPanel({ prayer, onSave }) {
   );
 }
 
-function PrayerTextView({ fullText, cards }) {
+// Five discrete text-size steps for the prayer's Arabic/transcription text
+// (shared by the Text and Cards screens), centered on step 3 (index 2) —
+// the size both screens always used before this control existed, kept as
+// the anchor so the adjustment reads as "bigger"/"smaller than normal"
+// rather than an arbitrary new default. The range is deliberately modest
+// in both directions: step 1 stays comfortably legible (shrinking text to
+// help no one), and step 5 stays inside what a card's fixed width can wrap
+// without ugly breaks.
+const PRAYER_FONT_STEPS = [
+  { arabic: "1.2rem", translit: "0.9rem" },
+  { arabic: "1.35rem", translit: "1rem" },
+  { arabic: "1.5rem", translit: "1.1rem" },
+  { arabic: "1.7rem", translit: "1.25rem" },
+  { arabic: "1.9rem", translit: "1.4rem" },
+];
+const PRAYER_FONT_STEP_DEFAULT = 2;
+
+// The "Размер текста" control itself — identical on both the Text and
+// Cards screens, so it's one component rather than two copies that could
+// drift apart.
+function PrayerTextSizeControl({ fontStep, setFontStep }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const fontStepButtonStyle = {
+    width: "38px",
+    height: "38px",
+    background: PALETTE.chip,
+    color: PALETTE.fadeText,
+    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+  };
+  return (
+    <div
+      className="shrink-0 w-full flex flex-col items-center gap-2"
+      style={{ paddingTop: "10px", paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)" }}
+    >
+      <span
+        className="uppercase"
+        style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.7rem", letterSpacing: "0.08em" }}
+      >
+        {t("Размер текста")}
+      </span>
+      <div className="flex items-center" style={{ gap: "12px" }}>
+        <button
+          onClick={() => setFontStep((s) => Math.max(0, s - 1))}
+          className="rounded-full flex items-center justify-center"
+          style={fontStepButtonStyle}
+          aria-label={t("Уменьшить размер текста")}
+        >
+          <Minus size={16} />
+        </button>
+        <div className="flex items-center gap-1.5">
+          {PRAYER_FONT_STEPS.map((_, i) => (
+            <span
+              key={i}
+              className="rounded-full"
+              style={{
+                width: i === fontStep ? "18px" : "6px",
+                height: "6px",
+                background: i === fontStep ? PALETTE.mustard : PALETTE.cardEdge,
+                transition: "width 0.2s ease, background 0.2s ease",
+              }}
+            />
+          ))}
+        </div>
+        <button
+          onClick={() => setFontStep((s) => Math.min(PRAYER_FONT_STEPS.length - 1, s + 1))}
+          className="rounded-full flex items-center justify-center"
+          style={fontStepButtonStyle}
+          aria-label={t("Увеличить размер текста")}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrayerTextView({ fullText, cards, fontStep, setFontStep }) {
   const PALETTE = useTheme();
   const t = useT();
   if (!cards.length && !fullText.trim()) {
@@ -6148,53 +6228,40 @@ function PrayerTextView({ fullText, cards }) {
       </p>
     );
   }
-  const lineStyle = { fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 2 };
-  if (cards.length) {
-    return (
-      <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
-        <div>
-          {cards.map((c) => (
-            <p key={c.id} dir="rtl" className="w-full text-center" style={lineStyle}>
-              {c.text}
-            </p>
-          ))}
-        </div>
-        <div className="mt-10">
-          {cards.map((c) => (
-            <p key={c.id} className="w-full text-center" style={lineStyle}>
-              {c.transcription}
-            </p>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const sizes = PRAYER_FONT_STEPS[fontStep];
+  const lineStyle = (fontSize) => ({ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.ink, fontSize, lineHeight: 2 });
   return (
-    <div className="flex-1 overflow-y-auto px-6 pb-10 max-w-md mx-auto w-full">
-      {fullText.split("\n").map((line, i) => (
-        <p key={i} dir={isArabicScript(line) ? "rtl" : "ltr"} className="w-full text-center" style={lineStyle}>
-          {line || "\u00a0"}
-        </p>
-      ))}
+    <div className="flex-1 min-h-0 flex flex-col px-6 max-w-md mx-auto w-full">
+      <div className="flex-1 min-h-0 overflow-y-auto pb-4">
+        {cards.length ? (
+          <>
+            <div>
+              {cards.map((c) => (
+                <p key={c.id} dir="rtl" className="w-full text-center" style={lineStyle(sizes.arabic)}>
+                  {c.text}
+                </p>
+              ))}
+            </div>
+            <div className="mt-10">
+              {cards.map((c) => (
+                <p key={c.id} className="w-full text-center" style={lineStyle(sizes.translit)}>
+                  {c.transcription}
+                </p>
+              ))}
+            </div>
+          </>
+        ) : (
+          fullText.split("\n").map((line, i) => (
+            <p key={i} dir={isArabicScript(line) ? "rtl" : "ltr"} className="w-full text-center" style={lineStyle(isArabicScript(line) ? sizes.arabic : sizes.translit)}>
+              {line || "\u00a0"}
+            </p>
+          ))
+        )}
+      </div>
+      <PrayerTextSizeControl fontStep={fontStep} setFontStep={setFontStep} />
     </div>
   );
 }
-
-// Five discrete text-size steps for the card's Arabic/transcription text,
-// centered on step 3 (index 2) — the size the cards always used before this
-// control existed, kept as the anchor so the adjustment reads as "bigger"
-// or "smaller than normal" rather than an arbitrary new default. The range
-// is deliberately modest in both directions: step 1 stays comfortably
-// legible (shrinking text to help no one), and step 5 stays inside what
-// the card's fixed width can wrap without ugly breaks.
-const PRAYER_FONT_STEPS = [
-  { arabic: "1.2rem", translit: "0.9rem" },
-  { arabic: "1.35rem", translit: "1rem" },
-  { arabic: "1.5rem", translit: "1.1rem" },
-  { arabic: "1.7rem", translit: "1.25rem" },
-  { arabic: "1.9rem", translit: "1.4rem" },
-];
-const PRAYER_FONT_STEP_DEFAULT = 2;
 
 function PrayerCard({ card, number, fontStep }) {
   const PALETTE = useTheme();
@@ -6240,11 +6307,19 @@ function PrayerCard({ card, number, fontStep }) {
   );
 }
 
-function PrayerCardsView({ cards }) {
+function PrayerCardsView({ prayer, onUpdate, resumeCardPosition, fontStep, setFontStep }) {
   const PALETTE = useTheme();
   const t = useT();
-  const [index, setIndex] = useState(0);
-  const [fontStep, setFontStep] = useState(PRAYER_FONT_STEP_DEFAULT);
+  const cards = prayer.cards;
+  // Seeded once per mount from the prayer's own saved position (only when
+  // "resume" is on) — PrayerScreen remounts this component every time the
+  // user re-opens the prayer or switches back from the Text tab, which is
+  // exactly the moment this should re-read the latest saved index.
+  const [index, setIndexRaw] = useState(() => {
+    if (!cards.length) return 0;
+    const saved = resumeCardPosition ? prayer.lastCardIndex ?? 0 : 0;
+    return Math.min(Math.max(saved, 0), cards.length - 1);
+  });
 
   if (cards.length === 0) {
     return (
@@ -6255,20 +6330,14 @@ function PrayerCardsView({ cards }) {
   }
   const clampedIndex = Math.min(index, cards.length - 1);
   const card = cards[clampedIndex];
-  const navButtonStyle = {
-    width: "56px",
-    height: "56px",
-    background: PALETTE.mustard,
-    color: PALETTE.bgDeep,
-    boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
+
+  const goTo = (next) => {
+    setIndexRaw(next);
+    if (resumeCardPosition) onUpdate(prayer.id, { lastCardIndex: next });
   };
-  const fontStepButtonStyle = {
-    width: "38px",
-    height: "38px",
-    background: PALETTE.chip,
-    color: PALETTE.fadeText,
-    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
-  };
+  const goPrev = () => goTo((clampedIndex - 1 + cards.length) % cards.length);
+  const goNext = () => goTo((clampedIndex + 1) % cards.length);
+
   return (
     <div className="flex-1 min-h-0 flex flex-col items-center px-6">
       {/* Card sits right under the Basmala (its gap comes from the
@@ -6277,25 +6346,26 @@ function PrayerCardsView({ cards }) {
       <div className="w-full shrink-0 flex justify-center">
         <PrayerCard card={card} number={clampedIndex + 1} fontStep={fontStep} />
       </div>
-      <div className="shrink-0 flex items-center" style={{ gap: "12px", marginTop: "26px" }}>
-        <button
-          onClick={() => setIndex((i) => (i - 1 + cards.length) % cards.length)}
-          className="rounded-full flex items-center justify-center"
-          style={navButtonStyle}
-          aria-label={t("Предыдущая")}
-        >
-          <ChevronLeft size={28} strokeWidth={2.5} />
+
+      {/* Two invisible tap zones spanning the full width under the card —
+          left half / right half — instead of the discrete circular buttons
+          this used to be. Each zone's chevron is nudged off-center toward
+          its own side of the screen (a hint, not a button people need to
+          hit precisely); the whole half is tappable. The counter overlays
+          the boundary between them with pointer-events disabled so it
+          never steals a tap meant for either zone. */}
+      <div className="shrink-0 relative w-full max-w-md flex items-center justify-center" style={{ height: "56px", marginTop: "26px" }}>
+        <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2 flex items-center justify-center">
+          <ChevronLeft size={26} strokeWidth={2} style={{ color: PALETTE.fadeText, transform: "translateX(-16px)" }} />
         </button>
-        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
-          {index + 1} / {cards.length}
-        </span>
-        <button
-          onClick={() => setIndex((i) => (i + 1) % cards.length)}
-          className="rounded-full flex items-center justify-center"
-          style={navButtonStyle}
-          aria-label={t("Следующая")}
+        <span
+          className="relative z-10 pointer-events-none"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}
         >
-          <ChevronRight size={28} strokeWidth={2.5} />
+          {clampedIndex + 1} / {cards.length}
+        </span>
+        <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2 flex items-center justify-center">
+          <ChevronRight size={26} strokeWidth={2} style={{ color: PALETTE.fadeText, transform: "translateX(16px)" }} />
         </button>
       </div>
 
@@ -6304,51 +6374,12 @@ function PrayerCardsView({ cards }) {
           pinned to the bottom of the screen instead of trailing the card. */}
       <div className="flex-1 min-h-0" />
 
-      <div className="shrink-0 w-full flex flex-col items-center gap-2" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)" }}>
-        <span
-          className="uppercase"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.7rem", letterSpacing: "0.08em" }}
-        >
-          {t("Размер текста")}
-        </span>
-        <div className="flex items-center" style={{ gap: "12px" }}>
-          <button
-            onClick={() => setFontStep((s) => Math.max(0, s - 1))}
-            className="rounded-full flex items-center justify-center"
-            style={fontStepButtonStyle}
-            aria-label={t("Уменьшить размер текста")}
-          >
-            <Minus size={16} />
-          </button>
-          <div className="flex items-center gap-1.5">
-            {PRAYER_FONT_STEPS.map((_, i) => (
-              <span
-                key={i}
-                className="rounded-full"
-                style={{
-                  width: i === fontStep ? "18px" : "6px",
-                  height: "6px",
-                  background: i === fontStep ? PALETTE.mustard : PALETTE.cardEdge,
-                  transition: "width 0.2s ease, background 0.2s ease",
-                }}
-              />
-            ))}
-          </div>
-          <button
-            onClick={() => setFontStep((s) => Math.min(PRAYER_FONT_STEPS.length - 1, s + 1))}
-            className="rounded-full flex items-center justify-center"
-            style={fontStepButtonStyle}
-            aria-label={t("Увеличить размер текста")}
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-      </div>
+      <PrayerTextSizeControl fontStep={fontStep} setFontStep={setFontStep} />
     </div>
   );
 }
 
-function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleTheme }) {
+function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleTheme, resumeCardPosition, onToggleResumeCardPosition }) {
   const PALETTE = useTheme();
   const t = useT();
   const viewportHeight = useVisualViewportHeight();
@@ -6356,6 +6387,10 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
   const hasContent = !!prayer.fullText.trim() || prayer.cards.length > 0;
   const [editing, setEditing] = useState(!hasContent);
   const [viewMode, setViewMode] = useState("text");
+  // Shared between Text and Cards so adjusting it in one carries over to
+  // the other — a "reading size" preference for this viewing session, not
+  // two independent settings someone has to set twice.
+  const [fontStep, setFontStep] = useState(PRAYER_FONT_STEP_DEFAULT);
 
   return (
     <div className="fixed inset-x-0 top-0 flex flex-col" style={{ background: PALETTE.bg, height: `${viewportHeight}px` }}>
@@ -6384,6 +6419,17 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
             </div>
           ) : (
             <>
+              {hasContent && prayer.cards.length > 0 && (
+                <button
+                  onClick={onToggleResumeCardPosition}
+                  aria-label={resumeCardPosition ? t("Продолжать с последней карточки") : t("Всегда начинать с первой карточки")}
+                  title={resumeCardPosition ? t("Продолжать с последней карточки") : t("Всегда начинать с первой карточки")}
+                  className="p-1"
+                  style={{ color: resumeCardPosition ? PALETTE.mustard : PALETTE.fadeText }}
+                >
+                  <History size={15} />
+                </button>
+              )}
               {hasContent && (
                 <button onClick={() => setEditing((e) => !e)} aria-label={t("Редактировать")} className="p-1" style={{ color: editing ? PALETTE.mustard : PALETTE.fadeText }}>
                   <Pencil size={15} />
@@ -6430,7 +6476,11 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
           <div className="px-6 max-w-md mx-auto w-full shrink-0" style={{ paddingBottom: viewMode === "cards" ? "34px" : "40px" }}>
             <BasmalaWatermark />
           </div>
-          {viewMode === "text" ? <PrayerTextView fullText={prayer.fullText} cards={prayer.cards} /> : <PrayerCardsView cards={prayer.cards} />}
+          {viewMode === "text" ? (
+            <PrayerTextView fullText={prayer.fullText} cards={prayer.cards} fontStep={fontStep} setFontStep={setFontStep} />
+          ) : (
+            <PrayerCardsView prayer={prayer} onUpdate={onUpdate} resumeCardPosition={resumeCardPosition} fontStep={fontStep} setFontStep={setFontStep} />
+          )}
         </>
       )}
     </div>
@@ -6525,6 +6575,7 @@ export default function App() {
   const [showTranscription, setShowTranscriptionRaw] = useState(false);
   const [reversed, setReversedRaw] = useState(false);
   const [lang, setLangRaw] = useState("ru");
+  const [resumeCardPosition, setResumeCardPositionRaw] = useState(true);
   const navRestored = useRef(false);
 
   useEffect(() => {
@@ -6546,6 +6597,10 @@ export default function App() {
       try {
         const res = await window.storage.get("reverse-v1", false);
         if (!cancelled && res && (res.value === "on" || res.value === "off")) setReversedRaw(res.value === "on");
+      } catch (e) {}
+      try {
+        const res = await window.storage.get("prayer-resume-position-v1", false);
+        if (!cancelled && res && (res.value === "on" || res.value === "off")) setResumeCardPositionRaw(res.value === "on");
       } catch (e) {}
       try {
         const res = await window.storage.get("language-v1", false);
@@ -6616,6 +6671,14 @@ export default function App() {
     });
   }, []);
 
+  const toggleResumeCardPosition = useCallback(() => {
+    setResumeCardPositionRaw((prev) => {
+      const value = !prev;
+      window.storage.set("prayer-resume-position-v1", value ? "on" : "off", false).catch(() => {});
+      return value;
+    });
+  }, []);
+
   const toggleLanguage = useCallback(() => {
     setLangRaw((prev) => {
       const next = prev === "ru" ? "en" : "ru";
@@ -6676,7 +6739,9 @@ export default function App() {
     <LanguageContext.Provider value={[lang, toggleLanguage]}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
-        <SelectionCapture onAdd={vocab.addEntry} />
+        {/* dlya-babosha has no Vocabulary section to add into, so this
+            never renders there — main Focus is unaffected. */}
+        {!ONLY_PRAYERS && <SelectionCapture onAdd={vocab.addEntry} />}
 
         {mode === "atoms" && openAtomRoot ? (
           <AtomTreeScreen
@@ -6698,6 +6763,8 @@ export default function App() {
             }}
             isDark={isDark}
             onToggleTheme={toggleTheme}
+            resumeCardPosition={resumeCardPosition}
+            onToggleResumeCardPosition={toggleResumeCardPosition}
           />
         ) : mode === "prayers" && prayerCreating ? (
           <PrayerCreateScreen
