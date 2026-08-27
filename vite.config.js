@@ -6,7 +6,10 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // GH_PAGES is set only by the GitHub Pages deploy workflow, since that's the
 // one build target that isn't served from the domain root (Netlify and the
-// Capacitor Android app both need base "/").
+// Capacitor Android app both need base "/"). GH_PAGES_BASE overrides the
+// sub-path outright — used by the separate prayers-only deploy (a different
+// repo's Pages site, built from this same source) which is served from its
+// own sub-path, not /KidApp/.
 let buildSha = "dev";
 try {
   buildSha = execSync("git rev-parse --short HEAD").toString().trim();
@@ -15,7 +18,7 @@ try {
 }
 
 export default defineConfig({
-  base: process.env.GH_PAGES ? "/KidApp/" : "/",
+  base: process.env.GH_PAGES_BASE || (process.env.GH_PAGES ? "/KidApp/" : "/"),
   define: {
     __BUILD_SHA__: JSON.stringify(buildSha),
   },

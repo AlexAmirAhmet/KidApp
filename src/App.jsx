@@ -67,6 +67,15 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 
+// Set only by the separate prayers-only deploy (a different GitHub Pages
+// site, built from this same source, for handing the app to someone who
+// only needs Молитвы) — everywhere else this is false and every mode
+// behaves exactly as it always has. True hides every mode but prayers from
+// ModeSwitch and starts the app straight on it; nothing else about the
+// dashboard (title, tagline, theme/language toggles, refresh button) is
+// mode-aware in a way this needs to touch separately.
+const ONLY_PRAYERS = import.meta.env.VITE_ONLY_PRAYERS === "true";
+
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=Katibeh&display=swap');
 @keyframes atomPulse {
   0%, 100% { transform: scale(1); }
@@ -6435,7 +6444,7 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
 function ModeSwitch({ mode, onChange }) {
   const PALETTE = useTheme();
   const t = useT();
-  const options = [
+  const allOptions = [
     { key: "language", label: t("Изучение языка"), Icon: Languages },
     { key: "focus", label: t("Мои цели"), Icon: Target },
     { key: "pages", label: "Pages", Icon: BookOpen },
@@ -6446,6 +6455,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "atoms", label: t("Атомы"), Icon: Atom },
     { key: "prayers", label: t("Молитвы"), Icon: BookHeart },
   ];
+  const options = ONLY_PRAYERS ? allOptions.filter((o) => o.key === "prayers") : allOptions;
   return (
     <div className="flex gap-2 p-1 rounded-full mb-8 flex-wrap justify-center" style={{ background: PALETTE.chip }}>
       {options.map(({ key, label, Icon }) => (
@@ -6476,7 +6486,7 @@ export default function App() {
   const { videos, addVideo, updateVideo, deleteVideo, refresh: refreshVideos } = useVideos();
   const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode, refresh: refreshAtoms } = useAtomForest();
   const { prayers, addPrayer, updatePrayer, deletePrayer, refresh: refreshPrayers } = usePrayers();
-  const [mode, setMode] = useState("language");
+  const [mode, setMode] = useState(ONLY_PRAYERS ? "prayers" : "language");
 
   // Dispatches the shared header's "Обновить" button to whichever
   // section's own data-loading function matches the mode currently on
@@ -6522,7 +6532,8 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        if (!cancelled && res && ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms", "prayers"].includes(res.value)) setMode(res.value);
+        const allowedModes = ONLY_PRAYERS ? ["prayers"] : ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms", "prayers"];
+        if (!cancelled && res && allowedModes.includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
         const res = await window.storage.get("theme-v1", false);
