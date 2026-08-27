@@ -593,23 +593,21 @@ const DECK_ICONS = [MessageCircle, Library, Layers, BookOpen];
 function useDecks() {
   const [decks, setDecks] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("decks-v1", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setDecks(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet — keep the empty start
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("decks-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setDecks(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet — keep the empty start
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setDecks(next);
@@ -652,7 +650,7 @@ function useDecks() {
     [decks, persist]
   );
 
-  return { decks, setDeckItems, addDeck, renameDeck, deleteDeck };
+  return { decks, setDeckItems, addDeck, renameDeck, deleteDeck, refresh };
 }
 
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
@@ -1736,23 +1734,21 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
 function useGoals() {
   const [goals, setGoals] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("goals-v1", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setGoals(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet — keep the empty start
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("goals-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setGoals(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet — keep the empty start
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setGoals(next);
@@ -1795,7 +1791,7 @@ function useGoals() {
     [goals, persist]
   );
 
-  return { goals, addGoal, renameGoal, deleteGoal, setGoalChildren };
+  return { goals, addGoal, renameGoal, deleteGoal, setGoalChildren, refresh };
 }
 
 function collectAtoms(node) {
@@ -2295,23 +2291,21 @@ function FocusDashboard({ goals, onOpen, onAddGoal }) {
 function useTextDocs(storageKey) {
   const [texts, setTexts] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get(storageKey, false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setTexts(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get(storageKey, false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setTexts(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet
+    }
   }, [storageKey]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(
     async (next) => {
@@ -2356,7 +2350,7 @@ function useTextDocs(storageKey) {
     [texts, persist]
   );
 
-  return { texts, addText, updateText, deleteText, deleteTexts };
+  return { texts, addText, updateText, deleteText, deleteTexts, refresh };
 }
 
 function TextForm({ initial, onSave, onCancel, titlePlaceholder, bodyPlaceholder }) {
@@ -3003,23 +2997,21 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, creat
 function useVocabulary() {
   const [entries, setEntries] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("vocabulary-v1", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setEntries(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("vocabulary-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setEntries(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setEntries(next);
@@ -3048,7 +3040,7 @@ function useVocabulary() {
     persist([]);
   }, [persist]);
 
-  return { entries, addEntry, deleteEntry, clearAll };
+  return { entries, addEntry, deleteEntry, clearAll, refresh };
 }
 
 // Mounted once at the app root regardless of mode/screen: watches the
@@ -3320,23 +3312,21 @@ function loadYouTubeIframeAPI() {
 function useVideos() {
   const [videos, setVideos] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("videos-v1", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setVideos(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("videos-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setVideos(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setVideos(next);
@@ -3379,7 +3369,7 @@ function useVideos() {
     [videos, persist]
   );
 
-  return { videos, addVideo, updateVideo, deleteVideo };
+  return { videos, addVideo, updateVideo, deleteVideo, refresh };
 }
 
 function VideoFormScreen({ initial, onCancel, onSave }) {
@@ -4119,23 +4109,21 @@ function resolveAtomChain(root, path) {
 function useAtomForest() {
   const [roots, setRoots] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get("atoms-v3", false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (Array.isArray(parsed)) setRoots(parsed);
-        }
-      } catch (e) {
-        // nothing saved yet
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("atoms-v3", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setRoots(parsed);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // nothing saved yet
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const persist = useCallback(async (next) => {
     setRoots(next);
@@ -4182,7 +4170,7 @@ function useAtomForest() {
     [roots, persist]
   );
 
-  return { roots, createRoot, updateNode, deleteNode };
+  return { roots, createRoot, updateNode, deleteNode, refresh };
 }
 
 // The round mic/keyboard input used to edit an already-created atom's
@@ -6402,16 +6390,35 @@ function ModeSwitch({ mode, onChange }) {
 }
 
 export default function App() {
-  const { decks, setDeckItems, addDeck, renameDeck, deleteDeck } = useDecks();
-  const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren } = useGoals();
-  const { texts, addText, updateText, deleteText } = useTextDocs("pages-texts-v1");
-  const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord } = useTextDocs("words-docs-v1");
+  const { decks, setDeckItems, addDeck, renameDeck, deleteDeck, refresh: refreshDecks } = useDecks();
+  const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren, refresh: refreshGoals } = useGoals();
+  const { texts, addText, updateText, deleteText, refresh: refreshPages } = useTextDocs("pages-texts-v1");
+  const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord, refresh: refreshWords } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
-  const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs } = useTextDocs("specs-v1");
-  const { videos, addVideo, updateVideo, deleteVideo } = useVideos();
-  const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode } = useAtomForest();
+  const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs, refresh: refreshSpecs } = useTextDocs("specs-v1");
+  const { videos, addVideo, updateVideo, deleteVideo, refresh: refreshVideos } = useVideos();
+  const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode, refresh: refreshAtoms } = useAtomForest();
   const { prayers, addPrayer, updatePrayer, deletePrayer, refresh: refreshPrayers } = usePrayers();
   const [mode, setMode] = useState("language");
+
+  // Dispatches the shared header's "Обновить" button to whichever
+  // section's own data-loading function matches the mode currently on
+  // screen — the button itself lives once in the shared dashboard header,
+  // but what it re-fetches is always contextual to where the user is.
+  const refreshCurrent = useCallback(() => {
+    const byMode = {
+      language: refreshDecks,
+      focus: refreshGoals,
+      pages: refreshPages,
+      words: refreshWords,
+      vocabulary: vocab.refresh,
+      specs: refreshSpecs,
+      videos: refreshVideos,
+      atoms: refreshAtoms,
+      prayers: refreshPrayers,
+    };
+    (byMode[mode] || (() => {}))();
+  }, [mode, refreshDecks, refreshGoals, refreshPages, refreshWords, vocab.refresh, refreshSpecs, refreshVideos, refreshAtoms, refreshPrayers]);
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
   const [openAtomRootId, setOpenAtomRootId] = useState(null);
@@ -6725,7 +6732,7 @@ export default function App() {
 
             <div className="w-full flex justify-end max-w-lg gap-2">
               <LanguageToggle lang={lang} onToggle={toggleLanguage} />
-              {mode === "prayers" && <RefreshButton onRefresh={refreshPrayers} />}
+              <RefreshButton onRefresh={refreshCurrent} />
               <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
             </div>
 
