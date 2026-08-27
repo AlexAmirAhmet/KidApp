@@ -6338,41 +6338,69 @@ function PrayerCardsView({ prayer, onUpdate, resumeCardPosition, fontStep, setFo
   const goPrev = () => goTo((clampedIndex - 1 + cards.length) % cards.length);
   const goNext = () => goTo((clampedIndex + 1) % cards.length);
 
+  // Height of the decorative header (chevron row + counter) pinned to the
+  // top of the tap-zone area below — the tapered divider's top edge lines
+  // up with the bottom of this so it never touches either.
+  const NAV_HEADER_HEIGHT = 76;
+
   return (
     <div className="flex-1 min-h-0 flex flex-col items-center px-6">
       {/* Card sits right under the Basmala (its gap comes from the
           watermark wrapper above), top-aligned rather than centered, so
-          its height doesn't push the nav row or font control around. */}
+          its height doesn't push the rest of the layout around. */}
       <div className="w-full shrink-0 flex justify-center">
         <PrayerCard card={card} number={clampedIndex + 1} fontStep={fontStep} />
       </div>
 
-      {/* Two invisible tap zones spanning the full width under the card —
-          left half / right half — instead of the discrete circular buttons
-          this used to be. Each zone's chevron is nudged off-center toward
-          its own side of the screen (a hint, not a button people need to
-          hit precisely); the whole half is tappable. The counter overlays
-          the boundary between them with pointer-events disabled so it
-          never steals a tap meant for either zone. */}
-      <div className="shrink-0 relative w-full max-w-md flex items-center justify-center" style={{ height: "56px", marginTop: "26px" }}>
-        <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2 flex items-center justify-center">
-          <ChevronLeft size={26} strokeWidth={2} style={{ color: PALETTE.fadeText, transform: "translateX(-16px)" }} />
-        </button>
-        <span
-          className="relative z-10 pointer-events-none"
-          style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}
-        >
-          {clampedIndex + 1} / {cards.length}
-        </span>
-        <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2 flex items-center justify-center">
-          <ChevronRight size={26} strokeWidth={2} style={{ color: PALETTE.fadeText, transform: "translateX(16px)" }} />
-        </button>
-      </div>
+      {/* The entire region from here down to TEXT SIZE is tappable, split
+          into a left half / right half — not just a slim button-sized
+          band. That's the actual fix: previously only a ~56px strip right
+          under the card responded to taps, so anywhere else in "the area
+          under the card" (which visually reads as one continuous zone)
+          did nothing. The chevrons, counter, and divider below are purely
+          decorative (pointer-events: none) — they sit on top of this pair
+          of full-height buttons and never intercept the tap themselves. */}
+      <div className="flex-1 min-h-0 relative w-full max-w-md" style={{ marginTop: "20px" }}>
+        <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2" />
+        <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2" />
 
-      {/* Flexible spacer: whatever room is left (which varies with card
-          height) goes here, so the font-size control below always sits
-          pinned to the bottom of the screen instead of trailing the card. */}
-      <div className="flex-1 min-h-0" />
+        <div className="absolute inset-x-0 top-0 pointer-events-none">
+          {/* Chevrons: centered in their own half's width, then nudged
+              further toward that half's outer screen edge; centered
+              vertically within this compact row. */}
+          <div className="relative w-full" style={{ height: "48px" }}>
+            <ChevronLeft
+              size={24}
+              strokeWidth={2}
+              style={{ position: "absolute", top: "50%", left: "17%", transform: "translate(-50%, -50%)", color: PALETTE.fadeText }}
+            />
+            <ChevronRight
+              size={24}
+              strokeWidth={2}
+              style={{ position: "absolute", top: "50%", right: "17%", transform: "translate(50%, -50%)", color: PALETTE.fadeText }}
+            />
+          </div>
+          <div className="w-full text-center" style={{ marginTop: "4px" }}>
+            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
+              {clampedIndex + 1} / {cards.length}
+            </span>
+          </div>
+        </div>
+
+        {/* Tapered divider: a thin vertical line, pointed at both ends and
+            widest at its middle, filling the free space between the
+            chevron/counter block above and TEXT SIZE below — built from
+            two mirrored CSS triangles rather than a fixed-height SVG so it
+            stretches correctly no matter how tall this flexible area ends
+            up being. */}
+        <div
+          className="absolute pointer-events-none"
+          style={{ left: "50%", transform: "translateX(-50%)", top: `${NAV_HEADER_HEIGHT}px`, bottom: 0, width: "4px" }}
+        >
+          <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 0%, 0 100%, 100% 100%)" }} />
+          <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 100%, 0 0, 100% 0)" }} />
+        </div>
+      </div>
 
       <PrayerTextSizeControl fontStep={fontStep} setFontStep={setFontStep} />
     </div>
