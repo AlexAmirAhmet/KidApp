@@ -352,6 +352,11 @@ const STRINGS = {
   "Без колоды": { en: "No deck" },
   "Добавить в колоду": { en: "Add to deck" },
   "Убрать из колоды": { en: "Remove from deck" },
+  "Все цитаты": { en: "All Quotes" },
+  "Список": { en: "List" },
+  "Удалить карточку": { en: "Delete card" },
+  "Удалить эту карточку навсегда?": { en: "Delete this card permanently?" },
+  "Цитат пока нет в этой колоде.": { en: "No quotes in this deck yet." },
   "Скопировать всё (N)": { ru: (n) => `Скопировать всё (${n})`, en: (n) => `Copy all (${n})` },
   "Удалить весь список (N) безвозвратно?": {
     ru: (n) => `Удалить весь список (${n}) безвозвратно?`,
@@ -1718,6 +1723,10 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
 
   return (
     <div className="grid grid-cols-2 gap-x-5 gap-y-10 w-full max-w-lg pt-8">
+      {/* "+ New deck" is the first tile, not the last — creating a deck is
+          a frequent action and used to require scrolling to the bottom of
+          however many decks already existed to reach it. */}
+      <CreateTile label={t("Новая колода")} placeholder={t("Название колоды")} onCreate={onAddDeck} />
       {decks.map((deck, i) => {
         const Icon = DECK_ICONS[i % DECK_ICONS.length];
         const iconColor = i % 2 === 0 ? PALETTE.mustard : PALETTE.ink;
@@ -1756,7 +1765,6 @@ function LanguageDashboard({ decks, onOpen, onAddDeck }) {
           </button>
         );
       })}
-      <CreateTile label={t("Новая колода")} placeholder={t("Название колоды")} onCreate={onAddDeck} />
     </div>
   );
 }
@@ -3120,7 +3128,7 @@ function useQuotes() {
     (text) => {
       const trimmed = (text || "").trim();
       if (!trimmed) return;
-      persist([...quotes, { id: uid(), front: trimmed, back: "", status: "active", deckId: null, createdAt: Date.now() }]);
+      persist([...quotes, { id: uid(), front: trimmed, back: "", status: "active", createdAt: Date.now() }]);
     },
     [quotes, persist]
   );
@@ -3128,11 +3136,19 @@ function useQuotes() {
   return { quotes, setItems, addFromSelection, refresh };
 }
 
-// A separate, lightweight collection of named decks scoped only to Мои
-// цитаты — not the same decks as "Изучение языка". Decks here are just
-// {id, name} metadata; a quote belongs to one (or none) via its own
-// `deckId` field, so assigning/reassigning a card never has to move it
-// between nested arrays.
+// The id of the always-present, undeletable "Все цитаты" deck — it isn't a
+// real stored deck (nothing in quote-decks-v1 ever has this id); it's a
+// virtual view over every quote in `quotes-v1`, exactly the set that
+// addFromSelection above appends to. Every quote is automatically "in" it
+// with no membership bookkeeping needed.
+const ALL_QUOTES_DECK_ID = "__all_quotes__";
+
+// A separate collection of named decks scoped only to Мои цитаты — not the
+// same decks as "Изучение языка". A deck here is {id, name, quoteIds}: a
+// set of references into the canonical quotes-v1 list, not copies of the
+// cards themselves. A quote can belong to several decks (or none, besides
+// the implicit "Все цитаты") at once — adding it to a deck never removes
+// it from anywhere else, so nothing is ever "lost" by filing it away.
 function useQuoteDecks() {
   const [decks, setDecksState] = useState([]);
 
@@ -3161,18 +3177,44 @@ function useQuoteDecks() {
     }
   }, []);
 
+  // initialQuoteIds lets a caller create-and-file-into-this-deck as one
+  // atomic update — calling addQuoteToDeck right after addDeck would read
+  // `decks` from a stale closure that doesn't have the brand-new deck yet.
   const addDeck = useCallback(
-    (name) => {
+    (name, initialQuoteIds = []) => {
       const trimmed = (name || "").trim();
       if (!trimmed) return null;
       const id = uid();
-      persist([...decks, { id, name: trimmed }]);
+      persist([...decks, { id, name: trimmed, quoteIds: initialQuoteIds }]);
       return id;
     },
     [decks, persist]
   );
 
-  return { decks, addDeck, refresh };
+  const addQuoteToDeck = useCallback(
+    (deckId, quoteId) => {
+      persist(decks.map((d) => (d.id === deckId && !d.quoteIds.includes(quoteId) ? { ...d, quoteIds: [...d.quoteIds, quoteId] } : d)));
+    },
+    [decks, persist]
+  );
+
+  const removeQuoteFromDeck = useCallback(
+    (deckId, quoteId) => {
+      persist(decks.map((d) => (d.id === deckId ? { ...d, quoteIds: d.quoteIds.filter((id) => id !== quoteId) } : d)));
+    },
+    [decks, persist]
+  );
+
+  // A deck deletion removes only the deck itself, never the quotes it
+  // referenced — they stay put in "Все цитаты" and in any other deck.
+  const removeQuoteEverywhere = useCallback(
+    (quoteId) => {
+      persist(decks.map((d) => (d.quoteIds.includes(quoteId) ? { ...d, quoteIds: d.quoteIds.filter((id) => id !== quoteId) } : d)));
+    },
+    [decks, persist]
+  );
+
+  return { decks, addDeck, addQuoteToDeck, removeQuoteFromDeck, removeQuoteEverywhere, refresh };
 }
 
 // Mounted once at the app root regardless of mode/screen: watches the
@@ -6668,57 +6710,27 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
 const QUOTE_FONT_STEPS = ["0.95rem", "1.05rem", "1.2rem", "1.4rem", "1.6rem"];
 const QUOTE_FONT_STEP_DEFAULT = 2;
 
-function QuoteTextSizeControl({ fontStep, setFontStep }) {
+// A small icon-only, no-label button — the shared building block for the
+// six equally-weighted actions in the Cards toolbar (edit, shuffle, font
+// -/+, add to deck, delete). aria-label/title carry the accessible name
+// since there's no visible text.
+function QuoteIconButton({ onClick, label, active, danger, children }) {
   const PALETTE = useTheme();
-  const t = useT();
-  const fontStepButtonStyle = {
-    width: "38px",
-    height: "38px",
-    background: PALETTE.chip,
-    color: PALETTE.fadeText,
-    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
-  };
   return (
-    <div className="shrink-0 w-full flex flex-col items-center gap-2" style={{ paddingTop: "18px", paddingBottom: "10px" }}>
-      <span
-        className="uppercase"
-        style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.7rem", letterSpacing: "0.08em" }}
-      >
-        {t("Размер текста")}
-      </span>
-      <div className="flex items-center" style={{ gap: "12px" }}>
-        <button
-          onClick={() => setFontStep((s) => Math.max(0, s - 1))}
-          className="rounded-full flex items-center justify-center"
-          style={fontStepButtonStyle}
-          aria-label={t("Уменьшить размер текста")}
-        >
-          <Minus size={16} />
-        </button>
-        <div className="flex items-center gap-1.5">
-          {QUOTE_FONT_STEPS.map((_, i) => (
-            <span
-              key={i}
-              className="rounded-full"
-              style={{
-                width: i === fontStep ? "18px" : "6px",
-                height: "6px",
-                background: i === fontStep ? PALETTE.mustard : PALETTE.cardEdge,
-                transition: "width 0.2s ease, background 0.2s ease",
-              }}
-            />
-          ))}
-        </div>
-        <button
-          onClick={() => setFontStep((s) => Math.min(QUOTE_FONT_STEPS.length - 1, s + 1))}
-          className="rounded-full flex items-center justify-center"
-          style={fontStepButtonStyle}
-          aria-label={t("Увеличить размер текста")}
-        >
-          <Plus size={16} />
-        </button>
-      </div>
-    </div>
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex items-center justify-center rounded-full shrink-0"
+      style={{
+        width: "32px",
+        height: "32px",
+        background: active ? PALETTE.mustard : PALETTE.chip,
+        color: danger ? PALETTE.danger : active ? PALETTE.bgDeep : PALETTE.fadeText,
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -6958,15 +6970,22 @@ function QuoteForm({ initial, onSave, onCancel }) {
 // decks — pick an existing one, type a new name to create-and-assign, or
 // clear the assignment. Same dimmed-backdrop modal pattern used elsewhere
 // in the app (VoiceOrKeyboardInput's capture screen).
-function QuoteDeckPicker({ decks, currentDeckId, onAssign, onCreateAndAssign, onClose }) {
+// Modal for filing the given quote into one or more of its own named
+// decks — each deck row toggles membership (tap adds it if the quote
+// isn't already there, removes it if it is), or type a new name to
+// create a deck and add the quote to it in one step. There's no separate
+// "remove" affordance because toggling an already-checked deck row does
+// exactly that.
+function QuoteDeckPicker({ decks, memberDeckIds, onToggleDeck, onCreateAndAdd, onClose }) {
   const PALETTE = useTheme();
   const t = useT();
   const [newName, setNewName] = useState("");
 
   const handleCreate = () => {
     if (!newName.trim()) return;
-    onCreateAndAssign(newName.trim());
+    onCreateAndAdd(newName.trim());
     setNewName("");
+    onClose();
   };
 
   return (
@@ -6984,34 +7003,27 @@ function QuoteDeckPicker({ decks, currentDeckId, onAssign, onCreateAndAssign, on
           {t("Добавить в колоду")}
         </p>
 
-        {currentDeckId && (
-          <button
-            onClick={() => onAssign(null)}
-            className="text-xs px-3 py-2 rounded-full"
-            style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
-          >
-            {t("Убрать из колоды")}
-          </button>
-        )}
-
         {decks.length > 0 && (
           <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-            {decks.map((deck) => (
-              <button
-                key={deck.id}
-                onClick={() => onAssign(deck.id)}
-                className="flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl text-sm"
-                style={{
-                  fontFamily: "'IBM Plex Sans', sans-serif",
-                  background: deck.id === currentDeckId ? PALETTE.mustard : PALETTE.chip,
-                  color: deck.id === currentDeckId ? PALETTE.bgDeep : PALETTE.ink,
-                  border: `1px solid ${PALETTE.cardEdge}`,
-                }}
-              >
-                <span className="truncate">{deck.name}</span>
-                {deck.id === currentDeckId && <Check size={15} className="shrink-0" />}
-              </button>
-            ))}
+            {decks.map((deck) => {
+              const active = memberDeckIds.includes(deck.id);
+              return (
+                <button
+                  key={deck.id}
+                  onClick={() => onToggleDeck(deck.id)}
+                  className="flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl text-sm"
+                  style={{
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                    background: active ? PALETTE.mustard : PALETTE.chip,
+                    color: active ? PALETTE.bgDeep : PALETTE.ink,
+                    border: `1px solid ${PALETTE.cardEdge}`,
+                  }}
+                >
+                  <span className="truncate">{deck.name}</span>
+                  {active && <Check size={15} className="shrink-0" />}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -7053,47 +7065,38 @@ function QuoteDeckPicker({ decks, currentDeckId, onAssign, onCreateAndAssign, on
   );
 }
 
-function QuotePracticeView({ quotes, setItems, quoteDecks, addQuoteDeck }) {
+// The Cards page for one open deck ("Все цитаты" or a named one) — a
+// completely different browsing layout from the language flashcards:
+// a single icon-only toolbar up top (position counter, then edit/shuffle/
+// font-size/add-to-deck/delete, all equally weighted), the card itself
+// (tap to flip, swipe up for the long box — unchanged from Изучение
+// языка), and beneath it nothing but the two tap zones for prev/next —
+// no visible buttons, no counter duplicated down there, no font control.
+function QuoteCardsPage({ items, initialFocusId, onSwipeUpStatus, onEditQuote, onDeleteQuote, onOpenDeckPicker }) {
   const PALETTE = useTheme();
   const t = useT();
-  const activeItems = quotes.filter((q) => q.status === "active");
-  // Sequence tracked by id and seeded once, exactly like the language
-  // deck's PracticeView — Мои цитаты is a single ever-present collection
-  // with no equivalent of "switching decks" to key a reset off of, so the
-  // per-action handlers below (moveCurrentToWaiting) keep orderIds/pos in
-  // sync themselves instead of an effect rebuilding them from scratch.
-  const [orderIds, setOrderIds] = useState(() => activeItems.map((q) => q.id));
-  const [pos, setPos] = useState(0);
+  const [orderIds, setOrderIds] = useState(() => items.map((q) => q.id));
+  const [pos, setPos] = useState(() => {
+    if (!initialFocusId) return 0;
+    const idx = items.findIndex((q) => q.id === initialFocusId);
+    return idx >= 0 ? idx : 0;
+  });
   const [flipped, setFlipped] = useState(false);
   const [rotation, setRotation] = useState(-1.5);
   const [editing, setEditing] = useState(false);
   const [fontStep, setFontStep] = useState(QUOTE_FONT_STEP_DEFAULT);
-  const [deckPickerOpen, setDeckPickerOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  if (!activeItems.length) {
+  if (!items.length) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
-        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>{t("В активной колоде пока пусто.")}</p>
-        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>
-          {t("Выдели любой текст в приложении и нажми «Добавить в цитаты» — или загляни в «Долгий ящик» и верни карточки в актив.")}
-        </p>
-      </div>
+      <p className="text-center px-6 py-16 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+        {t("Цитат пока нет в этой колоде.")}
+      </p>
     );
   }
 
   const currentId = orderIds[pos] ?? orderIds[0];
-  const item = activeItems.find((q) => q.id === currentId) || activeItems[0];
-  const currentDeck = quoteDecks.find((d) => d.id === item.deckId) || null;
-
-  const assignDeck = (deckId) => {
-    setItems(quotes.map((q) => (q.id === item.id ? { ...q, deckId } : q)));
-    setDeckPickerOpen(false);
-  };
-  const createAndAssignDeck = (name) => {
-    const id = addQuoteDeck(name);
-    if (id) setItems(quotes.map((q) => (q.id === item.id ? { ...q, deckId: id } : q)));
-    setDeckPickerOpen(false);
-  };
+  const item = items.find((q) => q.id === currentId) || items[0];
 
   const goTo = (newPos) => {
     setRotation((Math.random() - 0.5) * 4);
@@ -7103,64 +7106,96 @@ function QuotePracticeView({ quotes, setItems, quoteDecks, addQuoteDeck }) {
   const goPrev = () => goTo(pos - 1);
   const goNext = () => goTo(pos + 1);
 
-  const moveCurrentToWaiting = () => {
+  // Shared by swipe-up and delete: drops the current card out of THIS
+  // browsing session's remaining order and lands on whatever's next,
+  // exactly like the language deck's moveCurrentToWaiting.
+  const removeCurrentFromSession = () => {
     const removedId = item.id;
-    setItems(quotes.map((q) => (q.id === removedId ? { ...q, status: "waiting" } : q)));
     const nextOrder = orderIds.filter((id) => id !== removedId);
     setOrderIds(nextOrder);
     setPos((p) => Math.min(p, Math.max(nextOrder.length - 1, 0)));
+    setFlipped(false);
+  };
+
+  const handleSwipeUp = () => {
+    onSwipeUpStatus(item.id);
+    removeCurrentFromSession();
+  };
+
+  const handleShuffle = () => {
+    setOrderIds((ids) => shuffleArr(ids));
+    setPos(0);
+    setFlipped(false);
+    setRotation((Math.random() - 0.5) * 4);
   };
 
   const saveEdit = (fields) => {
-    setItems(quotes.map((q) => (q.id === item.id ? { ...q, ...fields } : q)));
+    onEditQuote(item.id, fields);
     setEditing(false);
     setFlipped(false);
   };
 
-  // Height of the decorative header (chevron row + counter) pinned to the
-  // top of the tap-zone area below — the tapered divider's top edge lines
-  // up with the bottom of this so it never touches either. Same mechanic
-  // as the Молитвы Cards screen: the whole left/right half is tappable,
-  // not just the chevron icon.
-  const NAV_HEADER_HEIGHT = 76;
+  const confirmAndDelete = () => {
+    onDeleteQuote(item.id);
+    setConfirmDelete(false);
+    removeCurrentFromSession();
+  };
 
   return (
     <div className="flex flex-col items-center px-6">
-      <div className="w-full max-w-md flex items-center justify-end gap-2 mb-4">
-        <button
-          onClick={() => setDeckPickerOpen(true)}
-          title={t("Добавить в колоду")}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full max-w-[45%]"
-          style={{
-            fontFamily: "'IBM Plex Sans', sans-serif",
-            background: currentDeck ? PALETTE.mustard : PALETTE.chip,
-            color: currentDeck ? PALETTE.bgDeep : PALETTE.fadeText,
-          }}
-        >
-          <Folder size={14} className="shrink-0" /> <span className="truncate">{currentDeck ? currentDeck.name : t("Колода")}</span>
-        </button>
-        <button
-          onClick={() => setEditing((e) => !e)}
-          title={t("Редактировать карточку")}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full shrink-0"
-          style={{
-            fontFamily: "'IBM Plex Sans', sans-serif",
-            background: editing ? PALETTE.mustard : PALETTE.chip,
-            color: editing ? PALETTE.bgDeep : PALETTE.fadeText,
-          }}
-        >
-          <Pencil size={14} /> {t("редактировать")}
-        </button>
+      <div className="w-full max-w-md flex items-center gap-2 mb-4">
+        <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem", whiteSpace: "nowrap" }}>
+          {pos + 1} / {orderIds.length}
+        </span>
+        <span className="shrink-0" style={{ width: "1px", height: "20px", background: PALETTE.cardEdge }} />
+        <div className="flex-1 flex items-center justify-end gap-1.5">
+          <QuoteIconButton onClick={() => setEditing((e) => !e)} active={editing} label={t("Редактировать карточку")}>
+            <Pencil size={15} />
+          </QuoteIconButton>
+          <QuoteIconButton onClick={handleShuffle} label={t("перемешать колоду")}>
+            <Shuffle size={15} />
+          </QuoteIconButton>
+          <QuoteIconButton onClick={() => setFontStep((s) => Math.max(0, s - 1))} label={t("Уменьшить размер текста")}>
+            <Minus size={15} />
+          </QuoteIconButton>
+          <QuoteIconButton onClick={() => setFontStep((s) => Math.min(QUOTE_FONT_STEPS.length - 1, s + 1))} label={t("Увеличить размер текста")}>
+            <Plus size={15} />
+          </QuoteIconButton>
+          <QuoteIconButton onClick={() => onOpenDeckPicker(item.id)} label={t("Добавить в колоду")}>
+            <Folder size={15} />
+          </QuoteIconButton>
+          <QuoteIconButton onClick={() => setConfirmDelete(true)} label={t("Удалить карточку")} danger>
+            <Trash2 size={15} />
+          </QuoteIconButton>
+        </div>
       </div>
+
+      {confirmDelete && (
+        <div
+          className="w-full max-w-md flex items-center justify-between gap-2 mb-4 px-4 py-2.5 rounded-2xl"
+          style={{ background: "rgba(217,60,60,0.1)", border: `1px solid ${PALETTE.danger}` }}
+        >
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger, fontSize: "0.85rem" }}>
+            {t("Удалить эту карточку навсегда?")}
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={confirmAndDelete} className="text-xs px-3 py-1.5 rounded-full" style={{ background: PALETTE.danger, color: "#fff" }}>
+              {t("Да")}
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="text-xs px-3 py-1.5 rounded-full"
+              style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+            >
+              {t("Отмена")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {editing ? (
         <QuoteForm initial={item} onSave={saveEdit} onCancel={() => setEditing(false)} />
       ) : (
-        // The whole practice block (card + tap zones + font control) is
-        // sunk into one bordered, inset-shadowed panel — otherwise the
-        // invisible tap-zone buttons and the font-size row would sit
-        // directly on the open dashboard background with nothing marking
-        // them as belonging to a distinct interactive area.
         <div
           className="w-full max-w-md rounded-3xl px-4 pt-6 pb-4 flex flex-col items-center"
           style={{
@@ -7169,198 +7204,323 @@ function QuotePracticeView({ quotes, setItems, quoteDecks, addQuoteDeck }) {
             border: `1px solid ${PALETTE.cardEdge}`,
           }}
         >
-          <QuoteCard key={item.id} item={item} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={rotation} fontStep={fontStep} onSwipeUp={moveCurrentToWaiting} />
+          <QuoteCard key={item.id} item={item} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={rotation} fontStep={fontStep} onSwipeUp={handleSwipeUp} />
 
-          <div className="relative w-full" style={{ marginTop: "20px", height: "190px" }}>
+          {/* Bottom zone is tap zones only — no counter, no buttons: the
+              whole area splits into a left/right half, each fully
+              tappable (not just the small chevron hint inside it). */}
+          <div className="relative w-full" style={{ marginTop: "20px", height: "170px" }}>
             <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2" />
             <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2" />
-
-            <div className="absolute inset-x-0 top-0 pointer-events-none">
-              <div className="relative w-full" style={{ height: "48px" }}>
-                <ChevronLeft
-                  size={24}
-                  strokeWidth={2}
-                  style={{ position: "absolute", top: "50%", left: "17%", transform: "translate(-50%, -50%)", color: PALETTE.fadeText }}
-                />
-                <ChevronRight
-                  size={24}
-                  strokeWidth={2}
-                  style={{ position: "absolute", top: "50%", right: "17%", transform: "translate(50%, -50%)", color: PALETTE.fadeText }}
-                />
-              </div>
-              <div className="w-full text-center" style={{ marginTop: "4px" }}>
-                <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
-                  {pos + 1} / {orderIds.length}
-                </span>
-              </div>
-            </div>
-
-            <div
-              className="absolute pointer-events-none"
-              style={{ left: "50%", transform: "translateX(-50%)", top: `${NAV_HEADER_HEIGHT}px`, bottom: 0, width: "4px" }}
-            >
+            <ChevronLeft
+              size={24}
+              strokeWidth={2}
+              className="pointer-events-none"
+              style={{ position: "absolute", top: "50%", left: "17%", transform: "translate(-50%, -50%)", color: PALETTE.fadeText }}
+            />
+            <ChevronRight
+              size={24}
+              strokeWidth={2}
+              className="pointer-events-none"
+              style={{ position: "absolute", top: "50%", right: "17%", transform: "translate(50%, -50%)", color: PALETTE.fadeText }}
+            />
+            <div className="absolute pointer-events-none" style={{ left: "50%", transform: "translateX(-50%)", top: 0, bottom: 0, width: "4px" }}>
               <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 0%, 0 100%, 100% 100%)" }} />
               <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 100%, 0 0, 100% 0)" }} />
             </div>
           </div>
-
-          <QuoteTextSizeControl fontStep={fontStep} setFontStep={setFontStep} />
         </div>
       )}
+    </div>
+  );
+}
 
-      {deckPickerOpen && (
+// The "Список" page for one open deck — Gmail-style: every quote is its
+// own full-width row sized to its own content (not clamped/truncated, not
+// a fixed tile height), newest concerns first. Tapping a row jumps into
+// Cards already focused on that quote; the small Folder icon on each row
+// reaches the same "add to deck" picker Cards has, without needing to
+// open the card first.
+function QuoteListPage({ items, onOpenCard, onOpenDeckPicker }) {
+  const PALETTE = useTheme();
+  const t = useT();
+
+  if (!items.length) {
+    return (
+      <p className="text-center px-6 py-16 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+        {t("Цитат пока нет в этой колоде.")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="w-full flex flex-col">
+      {items.map((item) => (
+        <div
+          key={item.id}
+          onClick={() => onOpenCard(item.id)}
+          className="w-full px-6 py-5 flex items-start justify-between gap-3 cursor-pointer"
+          style={{ borderBottom: `1px solid ${PALETTE.cardEdge}` }}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="whitespace-pre-wrap" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 1.4 }}>
+              {item.front}
+            </p>
+            {item.back && (
+              <p
+                className="whitespace-pre-wrap mt-1.5"
+                style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem", lineHeight: 1.4 }}
+              >
+                {item.back}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDeckPicker(item.id);
+            }}
+            aria-label={t("Добавить в колоду")}
+            title={t("Добавить в колоду")}
+            className="shrink-0 p-1.5 rounded-full"
+            style={{ color: PALETTE.fadeText }}
+          >
+            <Folder size={16} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One open deck's screen: two pages — Список (Part 5) and Cards (Part 3)
+// — switchable both by tapping the tab buttons and by a horizontal swipe
+// anywhere in the content area, looped in both directions (with only two
+// pages, "further the same way" and "the other way" both just mean "the
+// other page", so a plain toggle already satisfies the loop). The pages
+// are never mounted at the same time — switching to Cards always remounts
+// it fresh, which is also how it re-seeds its position from focusQuoteId
+// whenever Список hands it a specific card to jump to.
+function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpStatus, onDeleteQuote, onBack }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [page, setPage] = useState("list");
+  const [focusQuoteId, setFocusQuoteId] = useState(null);
+  const [pickerQuoteId, setPickerQuoteId] = useState(null);
+
+  const swipeRef = useRef({ startX: 0, startY: 0, active: false });
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      swipeRef.current = { startX: touch.clientX, startY: touch.clientY, active: true };
+    };
+    const onTouchMove = (e) => {
+      if (!swipeRef.current.active || !e.touches[0]) return;
+      const dx = e.touches[0].clientX - swipeRef.current.startX;
+      const dy = e.touches[0].clientY - swipeRef.current.startY;
+      // Only claims the gesture once it's unambiguously horizontal, so a
+      // vertical drag (scrolling Список, or a card's own flip/swipe-up)
+      // is left completely alone.
+      if (Math.abs(dx) > Math.abs(dy) * 1.5 && Math.abs(dx) > 10) e.preventDefault();
+    };
+    const onTouchEnd = (e) => {
+      if (!swipeRef.current.active) return;
+      swipeRef.current.active = false;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - swipeRef.current.startX;
+      const dy = touch.clientY - swipeRef.current.startY;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        setPage((p) => (p === "list" ? "cards" : "list"));
+      }
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, []);
+
+  const memberDeckIds = pickerQuoteId ? quoteDecks.decks.filter((d) => d.quoteIds.includes(pickerQuoteId)).map((d) => d.id) : [];
+
+  return (
+    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+      <HomeButton onClick={onBack} />
+      <div className="max-w-md mx-auto w-full px-6 pt-8">
+        <h2
+          className="text-center mb-5 truncate px-10"
+          style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", color: PALETTE.cream, fontSize: "1.4rem" }}
+        >
+          {deckName}
+        </h2>
+        <div className="flex gap-2 mb-2">
+          {[
+            { key: "list", label: t("Список") },
+            { key: "cards", label: t("Карточки") },
+          ].map((tabItem) => (
+            <button
+              key={tabItem.key}
+              onClick={() => setPage(tabItem.key)}
+              className="flex-1 text-xs py-2 rounded-full"
+              style={{
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                background: page === tabItem.key ? PALETTE.mustard : PALETTE.chip,
+                color: page === tabItem.key ? PALETTE.bgDeep : PALETTE.fadeText,
+              }}
+            >
+              {tabItem.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div ref={containerRef} className="pt-6">
+        {page === "list" ? (
+          <QuoteListPage
+            items={items}
+            onOpenCard={(id) => {
+              setFocusQuoteId(id);
+              setPage("cards");
+            }}
+            onOpenDeckPicker={setPickerQuoteId}
+          />
+        ) : (
+          <QuoteCardsPage
+            key={focusQuoteId || "start"}
+            items={items}
+            initialFocusId={focusQuoteId}
+            onSwipeUpStatus={onSwipeUpStatus}
+            onEditQuote={onEditQuote}
+            onDeleteQuote={onDeleteQuote}
+            onOpenDeckPicker={setPickerQuoteId}
+          />
+        )}
+      </div>
+
+      {pickerQuoteId && (
         <QuoteDeckPicker
-          decks={quoteDecks}
-          currentDeckId={item.deckId}
-          onAssign={assignDeck}
-          onCreateAndAssign={createAndAssignDeck}
-          onClose={() => setDeckPickerOpen(false)}
+          decks={quoteDecks.decks}
+          memberDeckIds={memberDeckIds}
+          onToggleDeck={(deckId) => {
+            if (memberDeckIds.includes(deckId)) quoteDecks.removeQuoteFromDeck(deckId, pickerQuoteId);
+            else quoteDecks.addQuoteToDeck(deckId, pickerQuoteId);
+          }}
+          onCreateAndAdd={(name) => quoteDecks.addDeck(name, [pickerQuoteId])}
+          onClose={() => setPickerQuoteId(null)}
         />
       )}
     </div>
   );
 }
 
-function QuoteListView({ quotes, setItems }) {
+// Дашборд раздела "Мои цитаты" — Gmail-style: full-width rows stacked
+// vertically, not the 2-column tile grid Изучение языка uses. "+ New
+// deck" is first (a slim row, just tall enough for the control), then the
+// permanent "Все цитаты" deck (every quote, always — nothing to create or
+// delete), then whatever named decks exist. Every deck row (Все цитаты
+// included) is the same fixed height regardless of name length.
+function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   const PALETTE = useTheme();
   const t = useT();
-  const waiting = quotes.filter((q) => q.status === "waiting");
-  const active = quotes.filter((q) => q.status === "active");
-  const [confirmId, setConfirmId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
-  const moveTo = (id, status) => setItems(quotes.map((q) => (q.id === id ? { ...q, status } : q)));
-  const removeItem = (id) => {
-    setItems(quotes.filter((q) => q.id !== id));
-    setConfirmId(null);
+  const submitCreate = () => {
+    if (!nameDraft.trim()) return;
+    const id = quoteDecks.addDeck(nameDraft);
+    setNameDraft("");
+    setCreating(false);
+    if (id) onOpen(id);
   };
-  const moveAllToActive = () => setItems(quotes.map((q) => (q.status === "waiting" ? { ...q, status: "active" } : q)));
-  const moveAllToWaiting = () => setItems(quotes.map((q) => (q.status === "active" ? { ...q, status: "waiting" } : q)));
 
-  const Row = ({ item }) => (
-    <div
-      className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
-      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
-    >
-      <div className="min-w-0">
+  const countActive = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "active").length;
+  const countWaiting = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "waiting").length;
+  const allIds = quotes.map((q) => q.id);
+
+  const rowStyle = {
+    background: PALETTE.card,
+    boxShadow: `6px 6px 14px ${PALETTE.shadowDark}, -6px -6px 14px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+    border: `1px solid ${PALETTE.cardEdge}`,
+  };
+
+  const DeckRow = ({ id, name, Icon, iconColor, ids }) => (
+    <button onClick={() => onOpen(id)} className="w-full rounded-2xl px-4 flex items-center gap-3 text-left" style={{ ...rowStyle, height: "76px" }}>
+      <span className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+        <Icon size={18} style={{ color: iconColor }} />
+      </span>
+      <div className="min-w-0 flex-1">
         <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
-          {item.front}
+          {name}
         </p>
-        {item.back && (
-          <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
-            {item.back}
-          </p>
-        )}
+        <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem" }}>
+          <span style={{ color: PALETTE.mintDeep }}>{t("N активных", countActive(ids))}</span>
+          {" · "}
+          <span style={{ color: PALETTE.waiting }}>{t("N в долгом ящике", countWaiting(ids))}</span>
+        </p>
       </div>
-
-      {confirmId === item.id ? (
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
-            {t("Удалить навсегда?")}
-          </span>
-          <button onClick={() => removeItem(item.id)} className="text-xs px-2 py-1 rounded-full" style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            {t("Да")}
-          </button>
-          <button onClick={() => setConfirmId(null)} className="text-xs px-2 py-1 rounded-full" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            {t("Отмена")}
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center shrink-0">
-          {item.status === "waiting" ? (
-            <button onClick={() => moveTo(item.id, "active")} title={t("Перенести в активную колоду")} className="p-1.5 rounded-full" style={{ color: PALETTE.mint, background: "rgba(120,132,148,0.16)" }}>
-              <ArrowRightCircle size={22} />
-            </button>
-          ) : (
-            <button onClick={() => moveTo(item.id, "waiting")} title={t("Отложить в долгий ящик")} className="p-1.5 rounded-full" style={{ color: PALETTE.waiting, background: "rgba(124,140,153,0.14)" }}>
-              <ArrowLeftCircle size={22} />
-            </button>
-          )}
-          <span className="mx-3 inline-block" style={{ width: "1px", height: "22px", background: "rgba(0,0,0,0.08)" }} />
-          <button onClick={() => setConfirmId(item.id)} title={t("Удалить")} className="p-1.5" style={{ color: "#5B6275" }}>
-            <Trash2 size={15} />
-          </button>
-        </div>
-      )}
-    </div>
+    </button>
   );
 
   return (
-    <div className="px-6 max-w-md mx-auto w-full">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="flex items-center gap-2" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}>
-          <Layers size={18} style={{ color: PALETTE.waiting }} /> {t("Долгий ящик (N)", waiting.length)}
-        </h3>
-        {waiting.length > 0 && (
-          <button onClick={moveAllToActive} className="text-xs px-3 py-1.5 rounded-full" style={{ background: PALETTE.mint, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            {t("всё в актив")}
-          </button>
-        )}
-      </div>
-      {waiting.length === 0 ? (
-        <p className="mb-6 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
-          {t("Пусто. Карточки, отправленные свайпом вверх, появляются здесь.")}
-        </p>
-      ) : (
-        <div className="mb-8">
-          {waiting.map((item) => (
-            <Row key={item.id} item={item} />
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="flex items-center gap-2" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}>
-          <BookOpen size={18} style={{ color: PALETTE.mint }} /> {t("В активной колоде (N)", active.length)}
-        </h3>
-        {active.length > 0 && (
-          <button onClick={moveAllToWaiting} className="text-xs px-3 py-1.5 rounded-full" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            {t("всё в долгий ящик")}
-          </button>
-        )}
-      </div>
-      {active.length === 0 ? (
-        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>{t("Пока ничего не выбрано для повторения.")}</p>
-      ) : (
-        active.map((item) => <Row key={item.id} item={item} />)
-      )}
-    </div>
-  );
-}
-
-function QuotesSection({ quotes, setItems, quoteDecks, addQuoteDeck }) {
-  const PALETTE = useTheme();
-  const t = useT();
-  const [tab, setTab] = useState("practice");
-  const waitingCount = quotes.filter((q) => q.status === "waiting").length;
-
-  const tabs = [
-    { key: "practice", label: t("Карточки") },
-    { key: "list", label: waitingCount ? t("Долгий ящик (N)", waitingCount) : t("Долгий ящик") },
-  ];
-
-  return (
-    <div className="w-full">
-      <div className="flex gap-2 mb-6 max-w-md mx-auto w-full px-6">
-        {tabs.map((tabItem) => (
+    <div className="w-full max-w-md mx-auto px-6 flex flex-col gap-3">
+      {creating ? (
+        <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={rowStyle}>
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitCreate()}
+            placeholder={t("Название колоды")}
+            className="flex-1 min-w-0 rounded-xl px-3 py-2 outline-none text-sm"
+            style={{ background: PALETTE.chip, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
+          />
           <button
-            key={tabItem.key}
-            onClick={() => setTab(tabItem.key)}
-            className="flex-1 text-xs py-2 rounded-full"
-            style={{
-              fontFamily: "'IBM Plex Sans', sans-serif",
-              background: tab === tabItem.key ? PALETTE.mustard : PALETTE.chip,
-              color: tab === tabItem.key ? PALETTE.bgDeep : PALETTE.fadeText,
-            }}
+            onClick={submitCreate}
+            disabled={!nameDraft.trim()}
+            aria-label={t("Создать колоду")}
+            className="p-2.5 rounded-xl disabled:opacity-40 shrink-0"
+            style={{ background: PALETTE.mustard, color: PALETTE.bgDeep }}
           >
-            {tabItem.label}
+            <Check size={16} />
           </button>
-        ))}
-      </div>
-      {tab === "practice" ? (
-        <QuotePracticeView quotes={quotes} setItems={setItems} quoteDecks={quoteDecks} addQuoteDeck={addQuoteDeck} />
+          <button
+            onClick={() => {
+              setCreating(false);
+              setNameDraft("");
+            }}
+            aria-label={t("Отмена")}
+            className="p-2.5 rounded-xl shrink-0"
+            style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+          >
+            <X size={16} />
+          </button>
+        </div>
       ) : (
-        <QuoteListView quotes={quotes} setItems={setItems} />
+        <button
+          onClick={() => setCreating(true)}
+          className="w-full rounded-2xl px-4 py-3 flex items-center justify-center gap-2"
+          style={rowStyle}
+        >
+          <Plus size={18} style={{ color: PALETTE.mustard }} />
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>{t("Новая колода")}</span>
+        </button>
       )}
+
+      <DeckRow id={ALL_QUOTES_DECK_ID} name={t("Все цитаты")} Icon={Quote} iconColor={PALETTE.mustard} ids={allIds} />
+
+      {quoteDecks.decks.map((deck) => (
+        <DeckRow key={deck.id} id={deck.id} name={deck.name} Icon={Folder} iconColor={PALETTE.ink} ids={deck.quoteIds} />
+      ))}
     </div>
   );
 }
@@ -7457,6 +7617,7 @@ export default function App() {
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
   const [openAtomRootId, setOpenAtomRootId] = useState(null);
+  const [openQuoteDeckId, setOpenQuoteDeckId] = useState(null);
   const [openPrayerId, setOpenPrayerId] = useState(null);
   const [prayerCreating, setPrayerCreating] = useState(false);
   const [openTextId, setOpenTextId] = useState(null);
@@ -7519,6 +7680,7 @@ export default function App() {
           if (nav.openDeckId) setOpenDeckId(nav.openDeckId);
           if (nav.openGoalId) setOpenGoalId(nav.openGoalId);
           if (nav.openAtomRootId) setOpenAtomRootId(nav.openAtomRootId);
+          if (nav.openQuoteDeckId) setOpenQuoteDeckId(nav.openQuoteDeckId);
           if (nav.openPrayerId) setOpenPrayerId(nav.openPrayerId);
           if (nav.openTextId) setOpenTextId(nav.openTextId);
           if (nav.openWordId) setOpenWordId(nav.openWordId);
@@ -7547,11 +7709,21 @@ export default function App() {
     window.storage
       .set(
         "app-nav-v1",
-        JSON.stringify({ openDeckId, openGoalId, openAtomRootId, openPrayerId, openTextId, openWordId, openSpecId, openVideoId }),
+        JSON.stringify({
+          openDeckId,
+          openGoalId,
+          openAtomRootId,
+          openQuoteDeckId,
+          openPrayerId,
+          openTextId,
+          openWordId,
+          openSpecId,
+          openVideoId,
+        }),
         false
       )
       .catch(() => {});
-  }, [openDeckId, openGoalId, openAtomRootId, openPrayerId, openTextId, openWordId, openSpecId, openVideoId]);
+  }, [openDeckId, openGoalId, openAtomRootId, openQuoteDeckId, openPrayerId, openTextId, openWordId, openSpecId, openVideoId]);
 
   const setShowTranscription = useCallback((next) => {
     setShowTranscriptionRaw((prev) => {
@@ -7663,6 +7835,23 @@ export default function App() {
             onToggleTheme={toggleTheme}
             resumeCardPosition={resumeCardPosition}
             onToggleResumeCardPosition={toggleResumeCardPosition}
+          />
+        ) : mode === "quotes" && openQuoteDeckId ? (
+          <QuoteDeckScreen
+            deckName={openQuoteDeckId === ALL_QUOTES_DECK_ID ? t("Все цитаты") : quoteDecks.decks.find((d) => d.id === openQuoteDeckId)?.name || ""}
+            items={
+              openQuoteDeckId === ALL_QUOTES_DECK_ID
+                ? quotes.quotes
+                : quotes.quotes.filter((q) => (quoteDecks.decks.find((d) => d.id === openQuoteDeckId)?.quoteIds || []).includes(q.id))
+            }
+            quoteDecks={quoteDecks}
+            onEditQuote={(id, fields) => quotes.setItems(quotes.quotes.map((q) => (q.id === id ? { ...q, ...fields } : q)))}
+            onSwipeUpStatus={(id) => quotes.setItems(quotes.quotes.map((q) => (q.id === id ? { ...q, status: "waiting" } : q)))}
+            onDeleteQuote={(id) => {
+              quotes.setItems(quotes.quotes.filter((q) => q.id !== id));
+              quoteDecks.removeQuoteEverywhere(id);
+            }}
+            onBack={() => setOpenQuoteDeckId(null)}
           />
         ) : mode === "prayers" && prayerCreating ? (
           <PrayerCreateScreen
@@ -7817,7 +8006,7 @@ export default function App() {
             ) : mode === "vocabulary" ? (
               <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
             ) : mode === "quotes" ? (
-              <QuotesSection quotes={quotes.quotes} setItems={quotes.setItems} quoteDecks={quoteDecks.decks} addQuoteDeck={quoteDecks.addDeck} />
+              <QuotesDashboard quotes={quotes.quotes} quoteDecks={quoteDecks} onOpen={setOpenQuoteDeckId} />
             ) : mode === "specs" ? (
               <SpecsList
                 specs={specs}
