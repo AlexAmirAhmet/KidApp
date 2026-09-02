@@ -41,6 +41,7 @@ import {
   Home,
   RefreshCw,
   History,
+  Quote,
 } from "lucide-react";
 
 // Offline storage shim: outside Claude's artifact sandbox, window.storage
@@ -330,6 +331,22 @@ const STRINGS = {
   "Добавить в Vocabulary": { en: "Add to Vocabulary" },
   "Пока пусто — выдели любой текст в приложении и нажми «Добавить в Vocabulary».": {
     en: "Nothing yet — select any text in the app and tap “Add to Vocabulary”.",
+  },
+  "Мои цитаты": { en: "My Quotes" },
+  "Добавить в цитаты": { en: "Add to Quotes" },
+  "Лицевая сторона (цитата) *": { en: "Front side (quote) *" },
+  "Оборотная сторона (перевод/пояснение)": { en: "Back side (translation/note)" },
+  "Нет перевода/пояснения. Нажми карандаш, чтобы добавить.": {
+    en: "No translation or note yet. Tap the pencil to add one.",
+  },
+  "Цитат пока нет. Выдели любой текст в приложении и нажми «Добавить в цитаты».": {
+    en: "No quotes yet. Select any text in the app and tap “Add to Quotes”.",
+  },
+  "Выдели любой текст в приложении и нажми «Добавить в цитаты» — или загляни в «Долгий ящик» и верни карточки в актив.": {
+    en: "Select any text in the app and tap “Add to Quotes” — or check the long box and bring cards back to the active deck.",
+  },
+  "Пусто. Карточки, отправленные свайпом вверх, появляются здесь.": {
+    en: "Empty. Cards you swipe up land here.",
   },
   "Скопировать всё (N)": { ru: (n) => `Скопировать всё (${n})`, en: (n) => `Copy all (${n})` },
   "Удалить весь список (N) безвозвратно?": {
@@ -3058,12 +3075,64 @@ function useVocabulary() {
   return { entries, addEntry, deleteEntry, clearAll, refresh };
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// QUOTES — "Мои цитаты": highlighted passages of any length, captured the
+// same way as Vocabulary (via SelectionCapture) but kept as their own flat
+// collection of two-sided cards (quote on the front, an initially-empty
+// translation/note on the back) rather than single words. Reuses the
+// active/waiting ("долгий ящик") status convention from the language decks.
+// ════════════════════════════════════════════════════════════════════════
+function useQuotes() {
+  const [quotes, setQuotesState] = useState([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.storage.get("quotes-v1", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (Array.isArray(parsed)) setQuotesState(parsed);
+      }
+    } catch (e) {
+      // nothing saved yet
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const persist = useCallback(async (next) => {
+    setQuotesState(next);
+    try {
+      await window.storage.set("quotes-v1", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Storage error", e);
+    }
+  }, []);
+
+  const setItems = useCallback((next) => persist(next), [persist]);
+
+  const addFromSelection = useCallback(
+    (text) => {
+      const trimmed = (text || "").trim();
+      if (!trimmed) return;
+      persist([...quotes, { id: uid(), front: trimmed, back: "", status: "active", createdAt: Date.now() }]);
+    },
+    [quotes, persist]
+  );
+
+  return { quotes, setItems, addFromSelection, refresh };
+}
+
 // Mounted once at the app root regardless of mode/screen: watches the
-// document's text selection and floats a small "Добавить в Vocabulary"
-// button next to whatever the user just highlighted. onMouseDown/onTouchStart
-// call preventDefault so pressing the button doesn't first collapse the
-// selection it's meant to capture.
-function SelectionCapture({ onAdd }) {
+// document's text selection and floats two small independent buttons next
+// to whatever the user just highlighted — "Добавить в Vocabulary" (single
+// words/phrases) and "Добавить в цитаты" (any length, becomes a quote
+// card). They're stacked in one anchored column rather than each finding
+// its own position, so they never overlap or fight over screen space.
+// onMouseDown/onTouchStart call preventDefault so pressing a button doesn't
+// first collapse the selection it's meant to capture.
+function SelectionCapture({ onAddVocab, onAddQuote }) {
   const PALETTE = useTheme();
   const t = useT();
   const [sel, setSel] = useState(null);
@@ -3100,15 +3169,18 @@ function SelectionCapture({ onAdd }) {
       // spare, not just past the text's own edge.
       const SYSTEM_MENU_CLEARANCE = 56;
       const HANDLE_CLEARANCE = 30;
+      // Two stacked buttons now sit at this anchor instead of one, so the
+      // clamps that used to leave room for a single ~40px-tall button leave
+      // room for the taller two-button column instead.
       if (rect.top >= SYSTEM_MENU_CLEARANCE) {
-        const top = Math.min(rect.bottom + HANDLE_CLEARANCE, window.innerHeight - 44);
+        const top = Math.min(rect.bottom + HANDLE_CLEARANCE, window.innerHeight - 96);
         const left = Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90);
         setSel({ text, placement: "below", top, left });
       } else {
         const spaceRight = window.innerWidth - rect.right;
         const spaceLeft = rect.left;
         const placement = spaceRight >= spaceLeft ? "right" : "left";
-        const top = Math.min(Math.max(rect.top + rect.height / 2, 30), window.innerHeight - 30);
+        const top = Math.min(Math.max(rect.top + rect.height / 2, 52), window.innerHeight - 52);
         const left =
           placement === "right"
             ? Math.min(rect.right + HANDLE_CLEARANCE, window.innerWidth - 8)
@@ -3130,7 +3202,7 @@ function SelectionCapture({ onAdd }) {
 
   if (!sel) return null;
 
-  const handleAdd = () => {
+  const handleAdd = (onAdd) => {
     onAdd(sel.text);
     window.getSelection()?.removeAllRanges();
     setSel(null);
@@ -3139,25 +3211,39 @@ function SelectionCapture({ onAdd }) {
   const transform =
     sel.placement === "right" ? "translate(0, -50%)" : sel.placement === "left" ? "translate(-100%, -50%)" : "translate(-50%, 0)";
 
+  const buttonBaseStyle = {
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
+  };
+
   return (
-    <button
-      onMouseDown={(e) => e.preventDefault()}
-      onTouchStart={(e) => e.preventDefault()}
-      onClick={handleAdd}
-      className="fixed flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium whitespace-nowrap"
-      style={{
-        top: `${sel.top}px`,
-        left: `${sel.left}px`,
-        transform,
-        zIndex: 9999,
-        background: PALETTE.mustard,
-        color: PALETTE.bgDeep,
-        fontFamily: "'IBM Plex Sans', sans-serif",
-        boxShadow: `4px 4px 10px ${PALETTE.shadowDark}, -4px -4px 10px ${PALETTE.shadowLight}`,
-      }}
+    <div
+      className="fixed flex flex-col items-stretch gap-1.5"
+      style={{ top: `${sel.top}px`, left: `${sel.left}px`, transform, zIndex: 9999 }}
     >
-      <Highlighter size={14} /> {t("Добавить в Vocabulary")}
-    </button>
+      {onAddVocab && (
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
+          onClick={() => handleAdd(onAddVocab)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap"
+          style={{ ...buttonBaseStyle, background: PALETTE.mustard, color: PALETTE.bgDeep }}
+        >
+          <Highlighter size={14} /> {t("Добавить в Vocabulary")}
+        </button>
+      )}
+      {onAddQuote && (
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
+          onClick={() => handleAdd(onAddQuote)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap"
+          style={{ ...buttonBaseStyle, background: PALETTE.card, color: PALETTE.mustard, border: `1px solid ${PALETTE.mustard}` }}
+        >
+          <Quote size={14} /> {t("Добавить в цитаты")}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -6516,6 +6602,570 @@ function PrayerScreen({ prayer, onBack, onUpdate, onDelete, isDark, onToggleThem
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// QUOTES — "Мои цитаты": a flat collection of two-sided cards captured by
+// selecting text anywhere in the app. Front side is the quote itself, back
+// starts empty (no auto-translation). Reuses the flip/swipe-up/edit
+// mechanics of the language flashcards, but pages between cards with the
+// same tap-zone + tapered-divider mechanic as the Молитвы Cards screen
+// (kept as its own copy rather than a shared component, since the two
+// features are independent and shouldn't risk regressing one another).
+// ════════════════════════════════════════════════════════════════════════
+
+// Five discrete text-size steps for a quote's own text — same idea as the
+// prayer text-size scale, just a single value per step since a quote has
+// no separate transliteration line to size independently.
+const QUOTE_FONT_STEPS = ["0.95rem", "1.05rem", "1.2rem", "1.4rem", "1.6rem"];
+const QUOTE_FONT_STEP_DEFAULT = 2;
+
+function QuoteTextSizeControl({ fontStep, setFontStep }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const fontStepButtonStyle = {
+    width: "38px",
+    height: "38px",
+    background: PALETTE.chip,
+    color: PALETTE.fadeText,
+    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+  };
+  return (
+    <div className="shrink-0 w-full flex flex-col items-center gap-2" style={{ paddingTop: "18px", paddingBottom: "10px" }}>
+      <span
+        className="uppercase"
+        style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.7rem", letterSpacing: "0.08em" }}
+      >
+        {t("Размер текста")}
+      </span>
+      <div className="flex items-center" style={{ gap: "12px" }}>
+        <button
+          onClick={() => setFontStep((s) => Math.max(0, s - 1))}
+          className="rounded-full flex items-center justify-center"
+          style={fontStepButtonStyle}
+          aria-label={t("Уменьшить размер текста")}
+        >
+          <Minus size={16} />
+        </button>
+        <div className="flex items-center gap-1.5">
+          {QUOTE_FONT_STEPS.map((_, i) => (
+            <span
+              key={i}
+              className="rounded-full"
+              style={{
+                width: i === fontStep ? "18px" : "6px",
+                height: "6px",
+                background: i === fontStep ? PALETTE.mustard : PALETTE.cardEdge,
+                transition: "width 0.2s ease, background 0.2s ease",
+              }}
+            />
+          ))}
+        </div>
+        <button
+          onClick={() => setFontStep((s) => Math.min(QUOTE_FONT_STEPS.length - 1, s + 1))}
+          className="rounded-full flex items-center justify-center"
+          style={fontStepButtonStyle}
+          aria-label={t("Увеличить размер текста")}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// The quote card itself: tap flips it, dragging up sends it to the long
+// box — exactly the language flashcard's gesture contract — except a quote
+// can run to a full paragraph, so the card has a fixed footprint and the
+// overflowing face scrolls internally instead of growing the card. That
+// internal scroll has to coexist with the swipe-up gesture: an upward drag
+// only becomes "swipe to the long box" once the visible face is already
+// scrolled to its end, so a long quote can be read in full before a swipe
+// is ever interpreted as a card-dismissal. Everything else (sideways,
+// downward once already at the top) is claimed but produces no motion, so
+// the card can never end up stuck mid-gesture.
+function QuoteCard({ item, flipped, onFlip, rotation, fontStep, onSwipeUp }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [dy, setDy] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const cardRef = useRef(null);
+  const scrollRef = useRef(null);
+  const drag = useRef({ startY: 0, startX: 0, active: false, suppressClick: false, committedUp: false });
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [flipped]);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      drag.current = { startY: touch.clientY, startX: touch.clientX, active: true, suppressClick: false, committedUp: false };
+      setDragging(true);
+    };
+
+    const onTouchMove = (e) => {
+      if (!drag.current.active || !e.touches[0]) return;
+      const touch = e.touches[0];
+      const dyNow = touch.clientY - drag.current.startY;
+      const dxNow = touch.clientX - drag.current.startX;
+      const isVerticalIntent = Math.abs(dyNow) > Math.abs(dxNow) * 1.5;
+
+      if (drag.current.committedUp) {
+        // Already recognized as the swipe-to-long-box gesture this touch —
+        // keep tracking it regardless of scroll position, so a mid-drag
+        // scroll bounce can't cancel it partway through.
+        e.preventDefault();
+        setDy(Math.min(dyNow, 0));
+        return;
+      }
+
+      const scroller = scrollRef.current;
+      const maxScrollTop = scroller ? Math.max(scroller.scrollHeight - scroller.clientHeight, 0) : 0;
+      const scrollTop = scroller ? scroller.scrollTop : 0;
+
+      if (dyNow < 0 && isVerticalIntent && scrollTop >= maxScrollTop - 1) {
+        // Dragging up with nothing left to reveal below — this is the
+        // swipe-to-long-box gesture.
+        e.preventDefault();
+        setDy(dyNow);
+        drag.current.committedUp = true;
+        return;
+      }
+
+      const stillHasRoomToScroll =
+        isVerticalIntent && maxScrollTop > 0 && !(dyNow > 0 && scrollTop <= 0) && !(dyNow < 0 && scrollTop >= maxScrollTop - 1);
+      if (stillHasRoomToScroll) {
+        // Let the browser scroll the long quote natively — don't claim the
+        // touch or move the card itself.
+        setDy(0);
+        return;
+      }
+
+      // Nothing left to scroll and not a swipe-up: claim the gesture past a
+      // small threshold so the browser doesn't hijack it mid-drag (pull-to-
+      // refresh, edge-swipe-back), same as the plain flashcard — but the
+      // card itself stays put, since down/sideways has no action bound.
+      if (Math.abs(dyNow) > 8 || Math.abs(dxNow) > 8) e.preventDefault();
+      setDy(0);
+    };
+
+    const endDrag = () => {
+      drag.current.active = false;
+      setDragging(false);
+      const wasUp = drag.current.committedUp;
+      drag.current.committedUp = false;
+      setDy((currentDy) => {
+        if (wasUp && currentDy < -90) {
+          drag.current.suppressClick = true;
+          onSwipeUp && onSwipeUp();
+        }
+        return 0;
+      });
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", endDrag, { passive: true });
+    el.addEventListener("touchcancel", endDrag, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", endDrag);
+      el.removeEventListener("touchcancel", endDrag);
+    };
+  }, [onSwipeUp]);
+
+  const handleClick = () => {
+    if (drag.current.suppressClick) {
+      drag.current.suppressClick = false;
+      return;
+    }
+    onFlip && onFlip();
+  };
+
+  const swipeProgress = Math.min(Math.max(-dy / 90, 0), 1);
+  const backText = (item.back || "").trim();
+  const showEmptyBack = flipped && !backText;
+
+  return (
+    <div ref={cardRef} onClick={handleClick} className="relative w-full max-w-md cursor-pointer" style={{ perspective: "1200px" }}>
+      {swipeProgress > 0 && (
+        <div
+          className="absolute -top-10 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full text-sm whitespace-nowrap"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif", background: PALETTE.waiting, color: "#fff", opacity: swipeProgress }}
+        >
+          {t("↑ в долгий ящик")}
+        </div>
+      )}
+      <div
+        className="absolute inset-0 rounded-2xl"
+        style={{ background: PALETTE.cardEdge, transform: `rotate(${rotation + 3}deg) translateY(6px)`, boxShadow: `4px 4px 10px ${PALETTE.shadowDark}` }}
+      />
+      <div
+        className="relative rounded-2xl px-6 flex flex-col"
+        style={{
+          background: PALETTE.card,
+          transform: `translateY(${dy}px) rotate(${rotation}deg)`,
+          transition: dragging ? "none" : "transform 0.35s cubic-bezier(.2,.8,.3,1)",
+          opacity: 1 - swipeProgress * 0.5,
+          height: "46vh",
+          maxHeight: "380px",
+          minHeight: "220px",
+          boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
+          border: `1px solid ${PALETTE.cardEdge}`,
+        }}
+      >
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 w-10 h-3 rounded-full" style={{ background: "rgba(140,155,165,0.18)" }} />
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto w-full flex items-center justify-center py-10" style={{ overscrollBehavior: "contain" }}>
+          {showEmptyBack ? (
+            <p
+              className="text-center px-2"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem", fontStyle: "italic", lineHeight: 1.4 }}
+            >
+              {t("Нет перевода/пояснения. Нажми карандаш, чтобы добавить.")}
+            </p>
+          ) : (
+            <p
+              className="w-full text-center whitespace-pre-wrap"
+              style={{
+                fontFamily: flipped ? "'IBM Plex Sans', sans-serif" : "'Fraunces', serif",
+                color: flipped ? PALETTE.mintDeep : PALETTE.ink,
+                fontSize: QUOTE_FONT_STEPS[fontStep],
+                fontWeight: 500,
+                lineHeight: 1.5,
+              }}
+            >
+              {flipped ? backText : item.front}
+            </p>
+          )}
+        </div>
+        <p className="pb-3 text-center text-xs tracking-wide shrink-0" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#AEB8BE" }}>
+          {flipped ? t("тап — вернуть · смахни вверх — в долгий ящик") : t("тап — перевернуть · смахни вверх — в долгий ящик")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Front (required) / back (optional) edit form — both sides at once, since
+// a quote's "translation" is really "whatever note belongs on the back",
+// not a single required field like the language deck's en/ru pair.
+function QuoteForm({ initial, onSave, onCancel }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [front, setFront] = useState(initial?.front || "");
+  const [back, setBack] = useState(initial?.back || "");
+
+  const fieldStyle = {
+    background: PALETTE.card,
+    color: PALETTE.ink,
+    fontFamily: "'IBM Plex Sans', sans-serif",
+    fontSize: "0.95rem",
+    border: `1px solid ${PALETTE.cardEdge}`,
+  };
+  const labelStyle = { fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.75rem", letterSpacing: "0.03em" };
+
+  const handleSave = () => {
+    if (!front.trim()) return;
+    onSave({ front: front.trim(), back: back.trim() });
+  };
+
+  return (
+    <div className="w-full max-w-md flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>{t("Лицевая сторона (цитата) *")}</label>
+        <textarea autoFocus value={front} onChange={(e) => setFront(e.target.value)} rows={6} className="rounded-xl px-3 py-2 outline-none resize-none" style={fieldStyle} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label style={labelStyle}>{t("Оборотная сторона (перевод/пояснение)")}</label>
+        <textarea value={back} onChange={(e) => setBack(e.target.value)} rows={6} className="rounded-xl px-3 py-2 outline-none resize-none" style={fieldStyle} />
+      </div>
+      <div className="flex gap-2 mt-1">
+        <button
+          onClick={handleSave}
+          disabled={!front.trim()}
+          className="flex-1 rounded-full py-2.5 text-sm font-medium disabled:opacity-40"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          {t("Сохранить")}
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 rounded-full py-2.5 text-sm"
+          style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          {t("Отмена")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuotePracticeView({ quotes, setItems }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const activeItems = quotes.filter((q) => q.status === "active");
+  // Sequence tracked by id and seeded once, exactly like the language
+  // deck's PracticeView — Мои цитаты is a single ever-present collection
+  // with no equivalent of "switching decks" to key a reset off of, so the
+  // per-action handlers below (moveCurrentToWaiting) keep orderIds/pos in
+  // sync themselves instead of an effect rebuilding them from scratch.
+  const [orderIds, setOrderIds] = useState(() => activeItems.map((q) => q.id));
+  const [pos, setPos] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [rotation, setRotation] = useState(-1.5);
+  const [editing, setEditing] = useState(false);
+  const [fontStep, setFontStep] = useState(QUOTE_FONT_STEP_DEFAULT);
+
+  if (!activeItems.length) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>{t("В активной колоде пока пусто.")}</p>
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>
+          {t("Выдели любой текст в приложении и нажми «Добавить в цитаты» — или загляни в «Долгий ящик» и верни карточки в актив.")}
+        </p>
+      </div>
+    );
+  }
+
+  const currentId = orderIds[pos] ?? orderIds[0];
+  const item = activeItems.find((q) => q.id === currentId) || activeItems[0];
+
+  const goTo = (newPos) => {
+    setRotation((Math.random() - 0.5) * 4);
+    setFlipped(false);
+    setPos((newPos + orderIds.length) % orderIds.length);
+  };
+  const goPrev = () => goTo(pos - 1);
+  const goNext = () => goTo(pos + 1);
+
+  const moveCurrentToWaiting = () => {
+    const removedId = item.id;
+    setItems(quotes.map((q) => (q.id === removedId ? { ...q, status: "waiting" } : q)));
+    const nextOrder = orderIds.filter((id) => id !== removedId);
+    setOrderIds(nextOrder);
+    setPos((p) => Math.min(p, Math.max(nextOrder.length - 1, 0)));
+  };
+
+  const saveEdit = (fields) => {
+    setItems(quotes.map((q) => (q.id === item.id ? { ...q, ...fields } : q)));
+    setEditing(false);
+    setFlipped(false);
+  };
+
+  // Height of the decorative header (chevron row + counter) pinned to the
+  // top of the tap-zone area below — the tapered divider's top edge lines
+  // up with the bottom of this so it never touches either. Same mechanic
+  // as the Молитвы Cards screen: the whole left/right half is tappable,
+  // not just the chevron icon.
+  const NAV_HEADER_HEIGHT = 76;
+
+  return (
+    <div className="flex flex-col items-center px-6">
+      <div className="w-full max-w-md flex items-center justify-end mb-4">
+        <button
+          onClick={() => setEditing((e) => !e)}
+          title={t("Редактировать карточку")}
+          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            background: editing ? PALETTE.mustard : PALETTE.chip,
+            color: editing ? PALETTE.bgDeep : PALETTE.fadeText,
+          }}
+        >
+          <Pencil size={14} /> {t("редактировать")}
+        </button>
+      </div>
+
+      {editing ? (
+        <QuoteForm initial={item} onSave={saveEdit} onCancel={() => setEditing(false)} />
+      ) : (
+        <>
+          <QuoteCard key={item.id} item={item} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={rotation} fontStep={fontStep} onSwipeUp={moveCurrentToWaiting} />
+
+          <div className="relative w-full max-w-md" style={{ marginTop: "20px", height: "190px" }}>
+            <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2" />
+            <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2" />
+
+            <div className="absolute inset-x-0 top-0 pointer-events-none">
+              <div className="relative w-full" style={{ height: "48px" }}>
+                <ChevronLeft
+                  size={24}
+                  strokeWidth={2}
+                  style={{ position: "absolute", top: "50%", left: "17%", transform: "translate(-50%, -50%)", color: PALETTE.fadeText }}
+                />
+                <ChevronRight
+                  size={24}
+                  strokeWidth={2}
+                  style={{ position: "absolute", top: "50%", right: "17%", transform: "translate(50%, -50%)", color: PALETTE.fadeText }}
+                />
+              </div>
+              <div className="w-full text-center" style={{ marginTop: "4px" }}>
+                <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem" }}>
+                  {pos + 1} / {orderIds.length}
+                </span>
+              </div>
+            </div>
+
+            <div
+              className="absolute pointer-events-none"
+              style={{ left: "50%", transform: "translateX(-50%)", top: `${NAV_HEADER_HEIGHT}px`, bottom: 0, width: "4px" }}
+            >
+              <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 0%, 0 100%, 100% 100%)" }} />
+              <div style={{ height: "50%", width: "100%", background: PALETTE.fadeText, clipPath: "polygon(50% 100%, 0 0, 100% 0)" }} />
+            </div>
+          </div>
+
+          <QuoteTextSizeControl fontStep={fontStep} setFontStep={setFontStep} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuoteListView({ quotes, setItems }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const waiting = quotes.filter((q) => q.status === "waiting");
+  const active = quotes.filter((q) => q.status === "active");
+  const [confirmId, setConfirmId] = useState(null);
+
+  const moveTo = (id, status) => setItems(quotes.map((q) => (q.id === id ? { ...q, status } : q)));
+  const removeItem = (id) => {
+    setItems(quotes.filter((q) => q.id !== id));
+    setConfirmId(null);
+  };
+  const moveAllToActive = () => setItems(quotes.map((q) => (q.status === "waiting" ? { ...q, status: "active" } : q)));
+  const moveAllToWaiting = () => setItems(quotes.map((q) => (q.status === "active" ? { ...q, status: "waiting" } : q)));
+
+  const Row = ({ item }) => (
+    <div
+      className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
+      style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
+    >
+      <div className="min-w-0">
+        <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+          {item.front}
+        </p>
+        {item.back && (
+          <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.8rem" }}>
+            {item.back}
+          </p>
+        )}
+      </div>
+
+      {confirmId === item.id ? (
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+            {t("Удалить навсегда?")}
+          </span>
+          <button onClick={() => removeItem(item.id)} className="text-xs px-2 py-1 rounded-full" style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            {t("Да")}
+          </button>
+          <button onClick={() => setConfirmId(null)} className="text-xs px-2 py-1 rounded-full" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            {t("Отмена")}
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center shrink-0">
+          {item.status === "waiting" ? (
+            <button onClick={() => moveTo(item.id, "active")} title={t("Перенести в активную колоду")} className="p-1.5 rounded-full" style={{ color: PALETTE.mint, background: "rgba(120,132,148,0.16)" }}>
+              <ArrowRightCircle size={22} />
+            </button>
+          ) : (
+            <button onClick={() => moveTo(item.id, "waiting")} title={t("Отложить в долгий ящик")} className="p-1.5 rounded-full" style={{ color: PALETTE.waiting, background: "rgba(124,140,153,0.14)" }}>
+              <ArrowLeftCircle size={22} />
+            </button>
+          )}
+          <span className="mx-3 inline-block" style={{ width: "1px", height: "22px", background: "rgba(0,0,0,0.08)" }} />
+          <button onClick={() => setConfirmId(item.id)} title={t("Удалить")} className="p-1.5" style={{ color: "#5B6275" }}>
+            <Trash2 size={15} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="px-6 max-w-md mx-auto w-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="flex items-center gap-2" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}>
+          <Layers size={18} style={{ color: PALETTE.waiting }} /> {t("Долгий ящик (N)", waiting.length)}
+        </h3>
+        {waiting.length > 0 && (
+          <button onClick={moveAllToActive} className="text-xs px-3 py-1.5 rounded-full" style={{ background: PALETTE.mint, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            {t("всё в актив")}
+          </button>
+        )}
+      </div>
+      {waiting.length === 0 ? (
+        <p className="mb-6 text-sm" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText }}>
+          {t("Пусто. Карточки, отправленные свайпом вверх, появляются здесь.")}
+        </p>
+      ) : (
+        <div className="mb-8">
+          {waiting.map((item) => (
+            <Row key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="flex items-center gap-2" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.2rem" }}>
+          <BookOpen size={18} style={{ color: PALETTE.mint }} /> {t("В активной колоде (N)", active.length)}
+        </h3>
+        {active.length > 0 && (
+          <button onClick={moveAllToWaiting} className="text-xs px-3 py-1.5 rounded-full" style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            {t("всё в долгий ящик")}
+          </button>
+        )}
+      </div>
+      {active.length === 0 ? (
+        <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>{t("Пока ничего не выбрано для повторения.")}</p>
+      ) : (
+        active.map((item) => <Row key={item.id} item={item} />)
+      )}
+    </div>
+  );
+}
+
+function QuotesSection({ quotes, setItems }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const [tab, setTab] = useState("practice");
+  const waitingCount = quotes.filter((q) => q.status === "waiting").length;
+
+  const tabs = [
+    { key: "practice", label: t("Карточки") },
+    { key: "list", label: waitingCount ? t("Долгий ящик (N)", waitingCount) : t("Долгий ящик") },
+  ];
+
+  return (
+    <div className="w-full">
+      <div className="flex gap-2 mb-6 max-w-md mx-auto w-full px-6">
+        {tabs.map((tabItem) => (
+          <button
+            key={tabItem.key}
+            onClick={() => setTab(tabItem.key)}
+            className="flex-1 text-xs py-2 rounded-full"
+            style={{
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              background: tab === tabItem.key ? PALETTE.mustard : PALETTE.chip,
+              color: tab === tabItem.key ? PALETTE.bgDeep : PALETTE.fadeText,
+            }}
+          >
+            {tabItem.label}
+          </button>
+        ))}
+      </div>
+      {tab === "practice" ? <QuotePracticeView quotes={quotes} setItems={setItems} /> : <QuoteListView quotes={quotes} setItems={setItems} />}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // App shell — theme, mode switch, routing between the six modes
 // ════════════════════════════════════════════════════════════════════════
 
@@ -6528,6 +7178,7 @@ function ModeSwitch({ mode, onChange }) {
     { key: "pages", label: "Pages", Icon: BookOpen },
     { key: "words", label: t("Слово"), Icon: BookMarked },
     { key: "vocabulary", label: "Vocabulary", Icon: Highlighter },
+    { key: "quotes", label: t("Мои цитаты"), Icon: Quote },
     { key: "specs", label: t("Спецификации"), Icon: NotebookPen },
     { key: "videos", label: t("Видео"), Icon: Video },
     { key: "atoms", label: t("Атомы"), Icon: Atom },
@@ -6560,6 +7211,7 @@ export default function App() {
   const { texts, addText, updateText, deleteText, refresh: refreshPages } = useTextDocs("pages-texts-v1");
   const { texts: words, addText: addWord, updateText: updateWord, deleteText: deleteWord, refresh: refreshWords } = useTextDocs("words-docs-v1");
   const vocab = useVocabulary();
+  const quotes = useQuotes();
   const { texts: specs, addText: addSpec, deleteTexts: deleteSpecs, refresh: refreshSpecs } = useTextDocs("specs-v1");
   const { videos, addVideo, updateVideo, deleteVideo, refresh: refreshVideos } = useVideos();
   const { roots: atomRoots, createRoot: createAtomRoot, updateNode: updateAtomNode, deleteNode: deleteAtomNode, refresh: refreshAtoms } = useAtomForest();
@@ -6577,13 +7229,14 @@ export default function App() {
       pages: refreshPages,
       words: refreshWords,
       vocabulary: vocab.refresh,
+      quotes: quotes.refresh,
       specs: refreshSpecs,
       videos: refreshVideos,
       atoms: refreshAtoms,
       prayers: refreshPrayers,
     };
     (byMode[mode] || (() => {}))();
-  }, [mode, refreshDecks, refreshGoals, refreshPages, refreshWords, vocab.refresh, refreshSpecs, refreshVideos, refreshAtoms, refreshPrayers]);
+  }, [mode, refreshDecks, refreshGoals, refreshPages, refreshWords, vocab.refresh, quotes.refresh, refreshSpecs, refreshVideos, refreshAtoms, refreshPrayers]);
   const [openDeckId, setOpenDeckId] = useState(null);
   const [openGoalId, setOpenGoalId] = useState(null);
   const [openAtomRootId, setOpenAtomRootId] = useState(null);
@@ -6611,7 +7264,7 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get("app-mode-v1", false);
-        const allowedModes = ONLY_PRAYERS ? ["prayers"] : ["language", "focus", "pages", "words", "vocabulary", "specs", "videos", "atoms", "prayers"];
+        const allowedModes = ONLY_PRAYERS ? ["prayers"] : ["language", "focus", "pages", "words", "vocabulary", "quotes", "specs", "videos", "atoms", "prayers"];
         if (!cancelled && res && allowedModes.includes(res.value)) setMode(res.value);
       } catch (e) {}
       try {
@@ -6767,9 +7420,9 @@ export default function App() {
     <LanguageContext.Provider value={[lang, toggleLanguage]}>
       <div style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
-        {/* dlya-babosha has no Vocabulary section to add into, so this
-            never renders there — main Focus is unaffected. */}
-        {!ONLY_PRAYERS && <SelectionCapture onAdd={vocab.addEntry} />}
+        {/* dlya-babosha has no Vocabulary/Quotes sections to add into, so
+            this never renders there — main Focus is unaffected. */}
+        {!ONLY_PRAYERS && <SelectionCapture onAddVocab={vocab.addEntry} onAddQuote={quotes.addFromSelection} />}
 
         {mode === "atoms" && openAtomRoot ? (
           <AtomTreeScreen
@@ -6901,6 +7554,8 @@ export default function App() {
                   ? t("Твои слова")
                   : mode === "vocabulary"
                   ? "Vocabulary"
+                  : mode === "quotes"
+                  ? t("Мои цитаты")
                   : mode === "specs"
                   ? t("Спецификации")
                   : mode === "videos"
@@ -6944,6 +7599,8 @@ export default function App() {
               />
             ) : mode === "vocabulary" ? (
               <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
+            ) : mode === "quotes" ? (
+              <QuotesSection quotes={quotes.quotes} setItems={quotes.setItems} />
             ) : mode === "specs" ? (
               <SpecsList
                 specs={specs}
