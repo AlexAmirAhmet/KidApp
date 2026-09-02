@@ -3157,7 +3157,14 @@ function useQuoteDecks() {
       const res = await window.storage.get("quote-decks-v1", false);
       if (res && res.value) {
         const parsed = JSON.parse(res.value);
-        if (Array.isArray(parsed)) setDecksState(parsed);
+        // Decks saved by an earlier version of this feature (before decks
+        // held quoteIds at all) would otherwise crash every .quoteIds.*
+        // call downstream — with no error boundary in this app, that
+        // takes the whole thing to a blank white screen, not just this
+        // section. Normalizing on load is cheap insurance against that.
+        if (Array.isArray(parsed)) {
+          setDecksState(parsed.map((d) => (Array.isArray(d.quoteIds) ? d : { ...d, quoteIds: [] })));
+        }
       }
     } catch (e) {
       // nothing saved yet
@@ -7565,7 +7572,65 @@ function ModeSwitch({ mode, onChange }) {
   );
 }
 
-export default function App() {
+// Catches any render-time crash anywhere below it and shows a recovery
+// screen instead of an unhandled error taking the whole page to a blank
+// white screen (the default outcome for an uncaught render error in
+// React, with nothing else here to catch it). This has real teeth: a
+// crash caused by stale/malformed data in localStorage — the kind that
+// doesn't go away on its own — would otherwise repeat on every single
+// reload, including a PWA relaunch, since nothing else clears it. Must be
+// a class component; React has no hook equivalent for error boundaries.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("Render error caught by ErrorBoundary:", error, info);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const wipeAndReload = () => {
+      try {
+        localStorage.clear();
+      } catch (e) {}
+      window.location.reload();
+    };
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center"
+        style={{ background: "#E8ECF1", fontFamily: "'IBM Plex Sans', sans-serif" }}
+      >
+        <p style={{ color: "#2E3742", fontSize: "1.1rem" }}>Что-то пошло не так</p>
+        <p style={{ color: "#7B8794", fontSize: "0.85rem", maxWidth: "320px" }}>
+          Приложение столкнулось с ошибкой и не может продолжить. Попробуй обновить страницу — если это не помогает
+          (ошибка повторяется сразу же), можно сбросить данные приложения, но это удалит все колоды, карточки и молитвы,
+          сохранённые только на этом устройстве.
+        </p>
+        <p style={{ color: "#AEB8BE", fontSize: "0.7rem", maxWidth: "320px", wordBreak: "break-word" }}>
+          {String(this.state.error?.message || this.state.error)}
+        </p>
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 rounded-full text-sm"
+            style={{ background: "#3D4652", color: "#F7F9FB" }}
+          >
+            Обновить страницу
+          </button>
+          <button onClick={wipeAndReload} className="px-5 py-2.5 rounded-full text-sm" style={{ background: "#D93C3C", color: "#fff" }}>
+            Сбросить данные
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+function AppInner() {
   const { decks, setDeckItems, addDeck, renameDeck, deleteDeck, refresh: refreshDecks } = useDecks();
   const { goals, addGoal, renameGoal, deleteGoal, setGoalChildren, refresh: refreshGoals } = useGoals();
   const { texts, addText, updateText, deleteText, refresh: refreshPages } = useTextDocs("pages-texts-v1");
@@ -8054,5 +8119,13 @@ export default function App() {
     </ReversedContext.Provider>
     </TranscriptionContext.Provider>
     </ThemeContext.Provider>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
   );
 }
