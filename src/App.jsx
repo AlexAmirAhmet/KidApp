@@ -6900,10 +6900,10 @@ function QuoteCard({ item, flipped, onFlip, rotation, fontStep, onSwipeUp }) {
             <p
               className="w-full text-center whitespace-pre-wrap"
               style={{
-                fontFamily: flipped ? "'IBM Plex Sans', sans-serif" : "'Fraunces', serif",
+                fontFamily: "'IBM Plex Sans', sans-serif",
                 color: flipped ? PALETTE.mintDeep : PALETTE.ink,
                 fontSize: QUOTE_FONT_STEPS[fontStep],
-                fontWeight: 500,
+                fontWeight: 400,
                 lineHeight: 1.5,
               }}
             >
@@ -7270,7 +7270,10 @@ function QuoteListPage({ items, onOpenCard, onOpenDeckPicker }) {
           style={{ borderBottom: `1px solid ${PALETTE.cardEdge}` }}
         >
           <div className="min-w-0 flex-1">
-            <p className="whitespace-pre-wrap" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 1.4 }}>
+            <p
+              className="whitespace-pre-wrap"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontWeight: 400, color: PALETTE.ink, fontSize: "1.05rem", lineHeight: 1.4 }}
+            >
               {item.front}
             </p>
             {item.back && (
@@ -7454,16 +7457,15 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   const countWaiting = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "waiting").length;
   const allIds = quotes.map((q) => q.id);
 
-  const rowStyle = {
-    background: PALETTE.card,
-    boxShadow: `6px 6px 14px ${PALETTE.shadowDark}, -6px -6px 14px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
-    border: `1px solid ${PALETTE.cardEdge}`,
-  };
+  // Flat, edge-to-edge rows with a hairline divider between them — no
+  // per-row card, shadow, border, or gap. That's the actual Gmail inbox
+  // look: rows read as one continuous list, not a stack of separate cards.
+  const rowDividerStyle = { borderBottom: `1px solid ${PALETTE.cardEdge}` };
 
   const DeckRow = ({ id, name, Icon, iconColor, ids }) => (
-    <button onClick={() => onOpen(id)} className="w-full rounded-2xl px-4 flex items-center gap-3 text-left" style={{ ...rowStyle, height: "76px" }}>
-      <span className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
-        <Icon size={18} style={{ color: iconColor }} />
+    <button onClick={() => onOpen(id)} className="w-full px-2 py-4 flex items-center gap-3 text-left" style={rowDividerStyle}>
+      <span className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+        <Icon size={17} style={{ color: iconColor }} />
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
@@ -7479,9 +7481,9 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   );
 
   return (
-    <div className="w-full max-w-md mx-auto px-6 flex flex-col gap-3">
+    <div className="w-full max-w-md mx-auto px-4 flex flex-col">
       {creating ? (
-        <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={rowStyle}>
+        <div className="px-2 py-3 flex items-center gap-2" style={rowDividerStyle}>
           <input
             autoFocus
             value={nameDraft}
@@ -7513,13 +7515,11 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
           </button>
         </div>
       ) : (
-        <button
-          onClick={() => setCreating(true)}
-          className="w-full rounded-2xl px-4 py-3 flex items-center justify-center gap-2"
-          style={rowStyle}
-        >
-          <Plus size={18} style={{ color: PALETTE.mustard }} />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.9rem" }}>{t("Новая колода")}</span>
+        <button onClick={() => setCreating(true)} className="w-full px-2 py-4 flex items-center gap-3" style={rowDividerStyle}>
+          <span className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
+            <Plus size={18} style={{ color: PALETTE.mustard }} />
+          </span>
+          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.95rem" }}>{t("Новая колода")}</span>
         </button>
       )}
 
