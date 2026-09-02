@@ -357,6 +357,10 @@ const STRINGS = {
   "Удалить карточку": { en: "Delete card" },
   "Удалить эту карточку навсегда?": { en: "Delete this card permanently?" },
   "Цитат пока нет в этой колоде.": { en: "No quotes in this deck yet." },
+  "Удалить колоду «N»? Это действие нельзя отменить.": {
+    ru: (name) => `Удалить колоду «${name}»? Это действие нельзя отменить.`,
+    en: (name) => `Delete the deck "${name}"? This can't be undone.`,
+  },
   "Скопировать всё (N)": { ru: (n) => `Скопировать всё (${n})`, en: (n) => `Copy all (${n})` },
   "Удалить весь список (N) безвозвратно?": {
     ru: (n) => `Удалить весь список (${n}) безвозвратно?`,
@@ -3221,7 +3225,16 @@ function useQuoteDecks() {
     [decks, persist]
   );
 
-  return { decks, addDeck, addQuoteToDeck, removeQuoteFromDeck, removeQuoteEverywhere, refresh };
+  // Deleting a deck only removes the deck itself — the quotes it
+  // referenced are untouched, staying in "Все цитаты" and any other deck.
+  const deleteDeck = useCallback(
+    (deckId) => {
+      persist(decks.filter((d) => d.id !== deckId));
+    },
+    [decks, persist]
+  );
+
+  return { decks, addDeck, addQuoteToDeck, removeQuoteFromDeck, removeQuoteEverywhere, deleteDeck, refresh };
 }
 
 // Mounted once at the app root regardless of mode/screen: watches the
@@ -7062,8 +7075,14 @@ function QuoteDeckPicker({ decks, memberDeckIds, onToggleDeck, onCreateAndAdd, o
 
         <button
           onClick={onClose}
-          className="text-sm py-2 rounded-full"
-          style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+          className="text-sm py-2.5 rounded-full"
+          style={{
+            background: PALETTE.chip,
+            color: PALETTE.fadeText,
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            border: `1px solid ${PALETTE.cardEdge}`,
+            boxShadow: `3px 3px 8px ${PALETTE.shadowDark}, -3px -3px 8px ${PALETTE.shadowLight}`,
+          }}
         >
           {t("Отмена")}
         </button>
@@ -7203,19 +7222,14 @@ function QuoteCardsPage({ items, initialFocusId, onSwipeUpStatus, onEditQuote, o
       {editing ? (
         <QuoteForm initial={item} onSave={saveEdit} onCancel={() => setEditing(false)} />
       ) : (
-        <div
-          className="w-full max-w-md rounded-3xl px-4 pt-6 pb-4 flex flex-col items-center"
-          style={{
-            background: PALETTE.card,
-            boxShadow: `inset 4px 4px 10px ${PALETTE.shadowDark}, inset -4px -4px 10px ${PALETTE.shadowLight}`,
-            border: `1px solid ${PALETTE.cardEdge}`,
-          }}
-        >
+        <div className="w-full max-w-md flex flex-col items-center">
           <QuoteCard key={item.id} item={item} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={rotation} fontStep={fontStep} onSwipeUp={handleSwipeUp} />
 
           {/* Bottom zone is tap zones only — no counter, no buttons: the
               whole area splits into a left/right half, each fully
-              tappable (not just the small chevron hint inside it). */}
+              tappable (not just the small chevron hint inside it). Sits
+              directly on the page background, same as the card above —
+              no shared wrapping panel around the two of them. */}
           <div className="relative w-full" style={{ marginTop: "20px", height: "170px" }}>
             <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2" />
             <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2" />
@@ -7260,14 +7274,19 @@ function QuoteListPage({ items, onOpenCard, onOpenDeckPicker }) {
     );
   }
 
+  // Same discrete-rounded-block treatment as the deck dashboard — each
+  // quote is its own block with a small gap to its neighbors, not a flat
+  // divider-only list.
+  const blockStyle = { background: "rgba(120,132,148,0.10)", borderRadius: "18px" };
+
   return (
-    <div className="w-full flex flex-col">
+    <div className="w-full max-w-md mx-auto px-4 flex flex-col gap-2">
       {items.map((item) => (
         <div
           key={item.id}
           onClick={() => onOpenCard(item.id)}
-          className="w-full px-6 py-5 flex items-start justify-between gap-3 cursor-pointer"
-          style={{ borderBottom: `1px solid ${PALETTE.cardEdge}` }}
+          className="w-full px-4 py-4 flex items-start justify-between gap-3 cursor-pointer"
+          style={blockStyle}
         >
           <div className="min-w-0 flex-1">
             <p
@@ -7311,12 +7330,13 @@ function QuoteListPage({ items, onOpenCard, onOpenDeckPicker }) {
 // are never mounted at the same time — switching to Cards always remounts
 // it fresh, which is also how it re-seeds its position from focusQuoteId
 // whenever Список hands it a specific card to jump to.
-function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpStatus, onDeleteQuote, onBack }) {
+function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpStatus, onDeleteQuote, canDelete, onDeleteDeck, onBack }) {
   const PALETTE = useTheme();
   const t = useT();
   const [page, setPage] = useState("list");
   const [focusQuoteId, setFocusQuoteId] = useState(null);
   const [pickerQuoteId, setPickerQuoteId] = useState(null);
+  const [confirmDeleteDeck, setConfirmDeleteDeck] = useState(false);
 
   const swipeRef = useRef({ startX: 0, startY: 0, active: false });
   const containerRef = useRef(null);
@@ -7394,7 +7414,13 @@ function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpSt
         </div>
       </div>
 
-      <div ref={containerRef} className="pt-6">
+      {/* A deck with few or no quotes renders very little content on
+          Список/Cards — without an explicit floor here, the touch
+          listeners below are only reachable within however tall that
+          content happens to be, leaving the rest of the visible screen
+          "dead" for a swipe (this is why swipe used to work in a full
+          "Все цитаты" but not in a mostly-empty user deck). */}
+      <div ref={containerRef} className="pt-6" style={{ minHeight: "60vh" }}>
         {page === "list" ? (
           <QuoteListPage
             items={items}
@@ -7416,6 +7442,40 @@ function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpSt
           />
         )}
       </div>
+
+      {canDelete && (
+        <div className="max-w-md mx-auto w-full px-6 pb-10 pt-6">
+          {!confirmDeleteDeck ? (
+            <button
+              onClick={() => setConfirmDeleteDeck(true)}
+              className="text-xs"
+              style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: "#B7BFC5" }}
+            >
+              {t("Удалить колоду «N»", deckName)}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.danger }}>
+                {t("Удалить колоду «N»? Это действие нельзя отменить.", deckName)}
+              </span>
+              <button
+                onClick={onDeleteDeck}
+                className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                style={{ background: PALETTE.danger, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Да")}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteDeck(false)}
+                className="text-xs px-3 py-1.5 rounded-full shrink-0"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              >
+                {t("Отмена")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {pickerQuoteId && (
         <QuoteDeckPicker
@@ -7457,16 +7517,15 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   const countWaiting = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "waiting").length;
   const allIds = quotes.map((q) => q.id);
 
-  // Flat, edge-to-edge rows with a hairline divider between them — no
-  // per-row card, shadow, border, or gap. That's the actual Gmail inbox
-  // look: rows read as one continuous list, not a stack of separate cards.
-  const rowDividerStyle = { borderBottom: `1px solid ${PALETTE.cardEdge}` };
+  // Each row is its own self-contained rounded block with a small gap to
+  // its neighbors — a tinted fill (this palette has no separate "surface"
+  // color from the page background, so a low-opacity neutral overlay
+  // stands in for one) rather than a divider-only flat list.
+  const blockStyle = { background: "rgba(120,132,148,0.10)", borderRadius: "18px" };
 
   const DeckRow = ({ id, name, Icon, iconColor, ids }) => (
-    <button onClick={() => onOpen(id)} className="w-full px-2 py-4 flex items-center gap-3 text-left" style={rowDividerStyle}>
-      <span className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
-        <Icon size={17} style={{ color: iconColor }} />
-      </span>
+    <button onClick={() => onOpen(id)} className="w-full px-4 py-4 flex items-center gap-4 text-left" style={blockStyle}>
+      <Icon size={20} style={{ color: iconColor }} className="shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
           {name}
@@ -7481,9 +7540,9 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   );
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 flex flex-col">
+    <div className="w-full max-w-md mx-auto px-4 flex flex-col gap-2">
       {creating ? (
-        <div className="px-2 py-3 flex items-center gap-2" style={rowDividerStyle}>
+        <div className="px-4 py-3 flex items-center gap-2" style={blockStyle}>
           <input
             autoFocus
             value={nameDraft}
@@ -7491,7 +7550,7 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
             onKeyDown={(e) => e.key === "Enter" && submitCreate()}
             placeholder={t("Название колоды")}
             className="flex-1 min-w-0 rounded-xl px-3 py-2 outline-none text-sm"
-            style={{ background: PALETTE.chip, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
+            style={{ background: PALETTE.card, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
           />
           <button
             onClick={submitCreate}
@@ -7509,16 +7568,14 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
             }}
             aria-label={t("Отмена")}
             className="p-2.5 rounded-xl shrink-0"
-            style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+            style={{ background: PALETTE.card, color: PALETTE.fadeText, border: `1px solid ${PALETTE.cardEdge}` }}
           >
             <X size={16} />
           </button>
         </div>
       ) : (
-        <button onClick={() => setCreating(true)} className="w-full px-2 py-4 flex items-center gap-3" style={rowDividerStyle}>
-          <span className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center" style={{ background: PALETTE.chip }}>
-            <Plus size={18} style={{ color: PALETTE.mustard }} />
-          </span>
+        <button onClick={() => setCreating(true)} className="w-full px-4 py-4 flex items-center gap-4" style={blockStyle}>
+          <Plus size={20} style={{ color: PALETTE.mustard }} className="shrink-0" />
           <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.95rem" }}>{t("Новая колода")}</span>
         </button>
       )}
@@ -7915,6 +7972,11 @@ function AppInner() {
             onDeleteQuote={(id) => {
               quotes.setItems(quotes.quotes.filter((q) => q.id !== id));
               quoteDecks.removeQuoteEverywhere(id);
+            }}
+            canDelete={openQuoteDeckId !== ALL_QUOTES_DECK_ID}
+            onDeleteDeck={() => {
+              quoteDecks.deleteDeck(openQuoteDeckId);
+              setOpenQuoteDeckId(null);
             }}
             onBack={() => setOpenQuoteDeckId(null)}
           />
