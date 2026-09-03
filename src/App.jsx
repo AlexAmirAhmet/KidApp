@@ -286,6 +286,7 @@ const STRINGS = {
     en: "No decks yet. Create your first one to start adding cards.",
   },
   "Создать колоду": { en: "Create deck" },
+  "Готово": { en: "Done" },
   "Название колоды": { en: "Deck name" },
   "N активных": { ru: (n) => `${n} активных`, en: (n) => `${n} active` },
   "N в долгом ящике": { ru: (n) => `${n} в долгом ящике`, en: (n) => `${n} in the long box` },
@@ -7005,7 +7006,9 @@ function QuoteDeckPicker({ decks, memberDeckIds, onToggleDeck, onCreateAndAdd, o
     if (!newName.trim()) return;
     onCreateAndAdd(newName.trim());
     setNewName("");
-    onClose();
+    // Stay open after creating — the new deck appears checked in the list
+    // above, and the user confirms with "Готово" just like toggling an
+    // existing deck, instead of the picker vanishing on its own.
   };
 
   return (
@@ -7073,19 +7076,33 @@ function QuoteDeckPicker({ decks, memberDeckIds, onToggleDeck, onCreateAndAdd, o
           </div>
         </div>
 
-        <button
-          onClick={onClose}
-          className="text-sm py-2.5 rounded-full"
-          style={{
-            background: PALETTE.chip,
-            color: PALETTE.fadeText,
-            fontFamily: "'IBM Plex Sans', sans-serif",
-            border: `1px solid ${PALETTE.cardEdge}`,
-            boxShadow: `3px 3px 8px ${PALETTE.shadowDark}, -3px -3px 8px ${PALETTE.shadowLight}`,
-          }}
-        >
-          {t("Отмена")}
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onClose}
+            className="text-sm py-2.5 rounded-full"
+            style={{
+              background: PALETTE.mustard,
+              color: PALETTE.bgDeep,
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              fontWeight: 500,
+            }}
+          >
+            {t("Готово")}
+          </button>
+          <button
+            onClick={onClose}
+            className="text-sm py-2.5 rounded-full"
+            style={{
+              background: PALETTE.chip,
+              color: PALETTE.fadeText,
+              fontFamily: "'IBM Plex Sans', sans-serif",
+              border: `1px solid ${PALETTE.cardEdge}`,
+              boxShadow: `3px 3px 8px ${PALETTE.shadowDark}, -3px -3px 8px ${PALETTE.shadowLight}`,
+            }}
+          >
+            {t("Отмена")}
+          </button>
+        </div>
       </div>
     </div>
   );
