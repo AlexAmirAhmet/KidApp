@@ -7204,7 +7204,7 @@ function QuoteCardsPage({ items, initialFocusId, onSwipeUpStatus, onEditQuote, o
   };
 
   return (
-    <div className="flex flex-col items-center px-6">
+    <div className="flex flex-col items-center px-6 flex-1 min-h-0">
       <div className="w-full max-w-md flex items-center gap-2 mb-4">
         <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.85rem", whiteSpace: "nowrap" }}>
           {pos + 1} / {orderIds.length}
@@ -7258,15 +7258,22 @@ function QuoteCardsPage({ items, initialFocusId, onSwipeUpStatus, onEditQuote, o
       {editing ? (
         <QuoteForm initial={item} onSave={saveEdit} onCancel={() => setEditing(false)} />
       ) : (
-        <div className="w-full max-w-md flex flex-col items-center">
+        <div className="w-full max-w-md flex flex-col items-center flex-1 min-h-0">
           <QuoteCard key={item.id} item={item} flipped={flipped} onFlip={() => setFlipped((f) => !f)} rotation={rotation} fontStep={fontStep} onSwipeUp={handleSwipeUp} />
 
           {/* Bottom zone is tap zones only — no counter, no buttons: the
               whole area splits into a left/right half, each fully
               tappable (not just the small chevron hint inside it). Sits
               directly on the page background, same as the card above —
-              no shared wrapping panel around the two of them. */}
-          <div className="relative w-full" style={{ marginTop: "20px", height: "170px" }}>
+              no shared wrapping panel around the two of them. flex-1 (the
+              card's own height is now adaptive, not fixed) makes this fill
+              every remaining pixel down to the screen edge instead of a
+              flat 170px — otherwise a short card left a dead unresponsive
+              gap below the old fixed-height zone. The divider and both
+              tap buttons already span top:0/bottom:0 of this div, so they
+              automatically stretch to match whatever height that ends up
+              being for the current card, no separate logic needed. */}
+          <div className="relative w-full flex-1" style={{ marginTop: "20px", minHeight: "120px" }}>
             <button onClick={goPrev} aria-label={t("Предыдущая")} className="absolute inset-y-0 left-0 w-1/2" />
             <button onClick={goNext} aria-label={t("Следующая")} className="absolute inset-y-0 right-0 w-1/2" />
             <ChevronLeft
@@ -7424,7 +7431,7 @@ function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpSt
   const memberDeckIds = pickerQuoteId ? quoteDecks.decks.filter((d) => d.quoteIds.includes(pickerQuoteId)).map((d) => d.id) : [];
 
   return (
-    <div className="min-h-screen" style={{ background: PALETTE.bg }}>
+    <div className="min-h-screen flex flex-col" style={{ background: PALETTE.bg }}>
       <HomeButton onClick={onBack} />
       <div className="max-w-md mx-auto w-full px-6 pt-8">
         <h2
@@ -7454,13 +7461,15 @@ function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpSt
         </div>
       </div>
 
-      {/* A deck with few or no quotes renders very little content on
-          Список/Cards — without an explicit floor here, the touch
-          listeners below are only reachable within however tall that
-          content happens to be, leaving the rest of the visible screen
-          "dead" for a swipe (this is why swipe used to work in a full
-          "Все цитаты" but not in a mostly-empty user deck). */}
-      <div ref={containerRef} className="pt-6" style={{ minHeight: "60vh" }}>
+      {/* flex-1 (the parent screen is now a full-height flex column) makes
+          this fill every bit of remaining vertical space down to the
+          screen edge (or the delete-deck footer, if present) — a floor
+          that adapts to whatever's actually available, rather than a
+          guessed 60vh. Same fix as before (item 4: a short deck's touch
+          listeners need reachable space beyond however tall its own
+          content is), just no longer a fixed guess now that Cards' own
+          card height is itself adaptive. */}
+      <div ref={containerRef} className="pt-6 flex-1 flex flex-col min-h-0">
         {page === "list" ? (
           <QuoteListPage
             items={items}
