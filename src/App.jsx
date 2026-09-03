@@ -6908,9 +6908,14 @@ function QuoteCard({ item, flipped, onFlip, rotation, fontStep, onSwipeUp }) {
           transform: `translateY(${dy}px) rotate(${rotation}deg)`,
           transition: dragging ? "none" : "transform 0.35s cubic-bezier(.2,.8,.3,1)",
           opacity: 1 - swipeProgress * 0.5,
-          height: "46vh",
+          // No fixed height — the card sizes to its content between these
+          // two bounds instead of always rendering at the same size
+          // regardless of how short or long the quote is. minHeight sits a
+          // bit under Изучение языка's flashcard (260px) since this card's
+          // font is smaller and user-adjustable; past maxHeight the text
+          // scrolls inside the card (below) rather than growing forever.
+          minHeight: "200px",
           maxHeight: "380px",
-          minHeight: "220px",
           boxShadow: `8px 8px 16px ${PALETTE.shadowDark}, -8px -8px 16px ${PALETTE.shadowLight}, 0 2px 0 ${PALETTE.cardHighlight} inset`,
           border: `1px solid ${PALETTE.cardEdge}`,
         }}
