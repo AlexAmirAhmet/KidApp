@@ -2977,11 +2977,11 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, creat
           {texts.map((doc) => (
             <div
               key={doc.id}
-              className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl mb-2"
+              className="flex items-center justify-between gap-4 px-4 py-4 rounded-[18px] mb-2"
               style={{ background: PALETTE.chip, border: `1px solid ${PALETTE.cardEdge}`, boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}` }}
             >
-              <button onClick={() => onOpen(doc.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                <RowIcon size={18} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
+              <button onClick={() => onOpen(doc.id)} className="flex items-center gap-4 min-w-0 flex-1 text-left">
+                <RowIcon size={20} style={{ color: PALETTE.mustard, flexShrink: 0 }} />
                 <div className="min-w-0">
                   <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
                     {doc.title}
@@ -3235,7 +3235,16 @@ function useQuoteDecks() {
     [decks, persist]
   );
 
-  return { decks, addDeck, addQuoteToDeck, removeQuoteFromDeck, removeQuoteEverywhere, deleteDeck, refresh };
+  const renameDeck = useCallback(
+    (deckId, name) => {
+      const trimmed = (name || "").trim();
+      if (!trimmed) return;
+      persist(decks.map((d) => (d.id === deckId ? { ...d, name: trimmed } : d)));
+    },
+    [decks, persist]
+  );
+
+  return { decks, addDeck, addQuoteToDeck, removeQuoteFromDeck, removeQuoteEverywhere, deleteDeck, renameDeck, refresh };
 }
 
 // Mounted once at the app root regardless of mode/screen: watches the
@@ -7514,17 +7523,91 @@ function QuoteDeckScreen({ deckName, items, quoteDecks, onEditQuote, onSwipeUpSt
   );
 }
 
+// A standalone top-level component (not a closure defined inside
+// QuotesDashboard) — the editing input below needs a stable component
+// identity across re-renders while the user types, or React would remount
+// it (and drop focus) on every keystroke, since a function redefined
+// inline on every parent render counts as a brand-new component type.
+function QuoteDeckRow({ id, name, Icon, iconColor, ids, quotes, onOpen, isEditing, editDraft, onDraftChange, onStartEdit, onSave, onCancel }) {
+  const PALETTE = useTheme();
+  const t = useT();
+  const countActive = ids.filter((qid) => quotes.some((q) => q.id === qid && q.status === "active")).length;
+  const countWaiting = ids.filter((qid) => quotes.some((q) => q.id === qid && q.status === "waiting")).length;
+
+  // Same raised-card treatment as Pages' row list — solid chip fill, a
+  // hairline border, and a dual offset shadow for the "floating above the
+  // background" relief — sized to this section's own row geometry
+  // (px-4/py-4, gap-4) rather than Pages' slightly tighter one.
+  const blockStyle = {
+    background: PALETTE.chip,
+    border: `1px solid ${PALETTE.cardEdge}`,
+    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+    borderRadius: "18px",
+  };
+
+  if (isEditing) {
+    return (
+      <div className="w-full px-4 py-3 flex items-center gap-2" style={blockStyle}>
+        <input
+          autoFocus
+          value={editDraft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSave()}
+          className="flex-1 min-w-0 rounded-xl px-3 py-2 outline-none text-sm"
+          style={{ background: PALETTE.card, color: PALETTE.ink, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
+        />
+        <button
+          onClick={onSave}
+          className="px-3 py-2 rounded-xl text-sm shrink-0"
+          style={{ background: PALETTE.mustard, color: PALETTE.bgDeep, fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          {t("Сохранить")}
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-2 rounded-xl text-sm shrink-0"
+          style={{ background: PALETTE.card, color: PALETTE.fadeText, fontFamily: "'IBM Plex Sans', sans-serif", border: `1px solid ${PALETTE.cardEdge}` }}
+        >
+          {t("Отмена")}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="w-full px-4 py-4 flex items-center gap-4" style={blockStyle}>
+      <button onClick={() => onOpen(id)} className="flex items-center gap-4 min-w-0 flex-1 text-left">
+        <Icon size={20} style={{ color: iconColor }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
+            {name}
+          </p>
+          <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem" }}>
+            <span style={{ color: PALETTE.mintDeep }}>{t("N активных", countActive)}</span>
+            {" · "}
+            <span style={{ color: PALETTE.waiting }}>{t("N в долгом ящике", countWaiting)}</span>
+          </p>
+        </div>
+      </button>
+      <button onClick={() => onStartEdit(id, name)} title={t("Редактировать")} className="p-1.5 shrink-0" style={{ color: PALETTE.fadeText }}>
+        <Pencil size={15} />
+      </button>
+    </div>
+  );
+}
+
 // Дашборд раздела "Мои цитаты" — Gmail-style: full-width rows stacked
 // vertically, not the 2-column tile grid Изучение языка uses. "+ New
 // deck" is first (a slim row, just tall enough for the control), then the
 // permanent "Все цитаты" deck (every quote, always — nothing to create or
 // delete), then whatever named decks exist. Every deck row (Все цитаты
 // included) is the same fixed height regardless of name length.
-function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
+function QuotesDashboard({ quotes, quoteDecks, onOpen, allQuotesName, onRenameAllQuotes }) {
   const PALETTE = useTheme();
   const t = useT();
   const [creating, setCreating] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const submitCreate = () => {
     if (!nameDraft.trim()) return;
@@ -7534,31 +7617,32 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
     if (id) onOpen(id);
   };
 
-  const countActive = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "active").length;
-  const countWaiting = (ids) => quotes.filter((q) => ids.includes(q.id) && q.status === "waiting").length;
+  const startEdit = (id, currentName) => {
+    setEditDraft(currentName);
+    setEditingId(id);
+  };
+
+  const saveEdit = () => {
+    const trimmed = editDraft.trim();
+    if (trimmed) {
+      if (editingId === ALL_QUOTES_DECK_ID) onRenameAllQuotes(trimmed);
+      else quoteDecks.renameDeck(editingId, trimmed);
+    }
+    setEditingId(null);
+  };
+
   const allIds = quotes.map((q) => q.id);
 
-  // Each row is its own self-contained rounded block with a small gap to
-  // its neighbors — a tinted fill (this palette has no separate "surface"
-  // color from the page background, so a low-opacity neutral overlay
-  // stands in for one) rather than a divider-only flat list.
-  const blockStyle = { background: "rgba(120,132,148,0.10)", borderRadius: "18px" };
-
-  const DeckRow = ({ id, name, Icon, iconColor, ids }) => (
-    <button onClick={() => onOpen(id)} className="w-full px-4 py-4 flex items-center gap-4 text-left" style={blockStyle}>
-      <Icon size={20} style={{ color: iconColor }} className="shrink-0" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate" style={{ fontFamily: "'Fraunces', serif", color: PALETTE.cream, fontSize: "1.05rem" }}>
-          {name}
-        </p>
-        <p className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.75rem" }}>
-          <span style={{ color: PALETTE.mintDeep }}>{t("N активных", countActive(ids))}</span>
-          {" · "}
-          <span style={{ color: PALETTE.waiting }}>{t("N в долгом ящике", countWaiting(ids))}</span>
-        </p>
-      </div>
-    </button>
-  );
+  // Same raised-card treatment as Pages' row list — solid chip fill, a
+  // hairline border, and a dual offset shadow for the "floating above the
+  // background" relief — sized to this section's own row geometry
+  // (px-4/py-4, gap-4) rather than Pages' slightly tighter one.
+  const blockStyle = {
+    background: PALETTE.chip,
+    border: `1px solid ${PALETTE.cardEdge}`,
+    boxShadow: `3px 3px 6px ${PALETTE.shadowDark}, -3px -3px 6px ${PALETTE.shadowLight}`,
+    borderRadius: "18px",
+  };
 
   return (
     // Bleeds past the page wrapper's own px-6 so the blocks land close to
@@ -7604,10 +7688,39 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
         </button>
       )}
 
-      <DeckRow id={ALL_QUOTES_DECK_ID} name={t("Все цитаты")} Icon={Quote} iconColor={PALETTE.mustard} ids={allIds} />
+      <QuoteDeckRow
+        id={ALL_QUOTES_DECK_ID}
+        name={allQuotesName || t("Все цитаты")}
+        Icon={Quote}
+        iconColor={PALETTE.mustard}
+        ids={allIds}
+        quotes={quotes}
+        onOpen={onOpen}
+        isEditing={editingId === ALL_QUOTES_DECK_ID}
+        editDraft={editDraft}
+        onDraftChange={setEditDraft}
+        onStartEdit={startEdit}
+        onSave={saveEdit}
+        onCancel={() => setEditingId(null)}
+      />
 
       {quoteDecks.decks.map((deck) => (
-        <DeckRow key={deck.id} id={deck.id} name={deck.name} Icon={Folder} iconColor={PALETTE.ink} ids={deck.quoteIds} />
+        <QuoteDeckRow
+          key={deck.id}
+          id={deck.id}
+          name={deck.name}
+          Icon={Folder}
+          iconColor={PALETTE.ink}
+          ids={deck.quoteIds}
+          quotes={quotes}
+          onOpen={onOpen}
+          isEditing={editingId === deck.id}
+          editDraft={editDraft}
+          onDraftChange={setEditDraft}
+          onStartEdit={startEdit}
+          onSave={saveEdit}
+          onCancel={() => setEditingId(null)}
+        />
       ))}
     </div>
   );
@@ -7781,6 +7894,11 @@ function AppInner() {
   const [reversed, setReversedRaw] = useState(false);
   const [lang, setLangRaw] = useState("ru");
   const [resumeCardPosition, setResumeCardPositionRaw] = useState(true);
+  // Empty string means "no custom name yet" — the virtual "Все цитаты"
+  // deck has no underlying stored object to hold a name field on (see
+  // ALL_QUOTES_DECK_ID above), so its rename support needs its own single
+  // persisted string instead of living in quote-decks-v1 like a real deck.
+  const [allQuotesName, setAllQuotesNameRaw] = useState("");
   const navRestored = useRef(false);
 
   useEffect(() => {
@@ -7810,6 +7928,10 @@ function AppInner() {
       try {
         const res = await window.storage.get("language-v1", false);
         if (!cancelled && res && (res.value === "ru" || res.value === "en")) setLangRaw(res.value);
+      } catch (e) {}
+      try {
+        const res = await window.storage.get("quotes-all-name-v1", false);
+        if (!cancelled && res && typeof res.value === "string") setAllQuotesNameRaw(res.value);
       } catch (e) {}
       // Restores exactly which item was open (deck/goal/prayer/text/etc.)
       // so a reload — pull-to-refresh, a manual browser refresh, or the PWA
@@ -7893,6 +8015,13 @@ function AppInner() {
       window.storage.set("prayer-resume-position-v1", value ? "on" : "off", false).catch(() => {});
       return value;
     });
+  }, []);
+
+  const renameAllQuotes = useCallback((name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setAllQuotesNameRaw(trimmed);
+    window.storage.set("quotes-all-name-v1", trimmed, false).catch(() => {});
   }, []);
 
   const toggleLanguage = useCallback(() => {
@@ -7984,7 +8113,7 @@ function AppInner() {
           />
         ) : mode === "quotes" && openQuoteDeckId ? (
           <QuoteDeckScreen
-            deckName={openQuoteDeckId === ALL_QUOTES_DECK_ID ? t("Все цитаты") : quoteDecks.decks.find((d) => d.id === openQuoteDeckId)?.name || ""}
+            deckName={openQuoteDeckId === ALL_QUOTES_DECK_ID ? allQuotesName || t("Все цитаты") : quoteDecks.decks.find((d) => d.id === openQuoteDeckId)?.name || ""}
             items={
               openQuoteDeckId === ALL_QUOTES_DECK_ID
                 ? quotes.quotes
@@ -8157,7 +8286,13 @@ function AppInner() {
             ) : mode === "vocabulary" ? (
               <VocabularyList entries={vocab.entries} onDelete={vocab.deleteEntry} onClearAll={vocab.clearAll} />
             ) : mode === "quotes" ? (
-              <QuotesDashboard quotes={quotes.quotes} quoteDecks={quoteDecks} onOpen={setOpenQuoteDeckId} />
+              <QuotesDashboard
+                quotes={quotes.quotes}
+                quoteDecks={quoteDecks}
+                onOpen={setOpenQuoteDeckId}
+                allQuotesName={allQuotesName}
+                onRenameAllQuotes={renameAllQuotes}
+              />
             ) : mode === "specs" ? (
               <SpecsList
                 specs={specs}
