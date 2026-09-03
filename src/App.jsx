@@ -2955,7 +2955,12 @@ function PagesList({ texts, onOpen, onCreate, onEdit, onDelete, emptyText, creat
   const resolvedCreateLabel = createLabel ?? t("Добавить текст");
 
   return (
-    <div className="w-full max-w-md px-6 pt-8">
+    // Same width/margin treatment as the "Мои цитаты" dashboard rows —
+    // bleeds past the page wrapper's own px-6 so the whole block column
+    // (not just row height/padding) matches that section's format:
+    // near-edge-to-edge, not a narrower centered column with its own
+    // stacked px-6 on top of the wrapper's.
+    <div className="pt-8" style={{ width: "calc(100% + 16px)", marginLeft: "-8px", marginRight: "-8px" }}>
       {texts.length === 0 ? (
         <div className="flex flex-col items-center gap-6 py-10">
           <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, textAlign: "center" }}>
