@@ -7297,7 +7297,11 @@ function QuoteListPage({ items, onOpenCard, onOpenDeckPicker }) {
   const blockStyle = { background: "rgba(120,132,148,0.10)", borderRadius: "18px" };
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 flex flex-col gap-2">
+    // Unlike the dashboard, this list sits directly under QuoteDeckScreen's
+    // own header (which already uses a single px-6), so a plain px-4 here
+    // — no extra wrapper padding stacked on top of it — already lands
+    // close to the screen edge.
+    <div className="w-full px-4 flex flex-col gap-2">
       {items.map((item) => (
         <div
           key={item.id}
@@ -7557,7 +7561,10 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen }) {
   );
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 flex flex-col gap-2">
+    // Bleeds past the page wrapper's own px-6 so the blocks land close to
+    // the screen edge (~16px total), matching the Gmail reference instead
+    // of stacking wrapper padding + local padding into a wide dead margin.
+    <div className="flex flex-col gap-2" style={{ width: "calc(100% + 16px)", marginLeft: "-8px", marginRight: "-8px" }}>
       {creating ? (
         <div className="px-4 py-3 flex items-center gap-2" style={blockStyle}>
           <input
