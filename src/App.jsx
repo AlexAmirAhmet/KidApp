@@ -291,6 +291,7 @@ const STRINGS = {
   "N активных": { ru: (n) => `${n} активных`, en: (n) => `${n} active` },
   "N в долгом ящике": { ru: (n) => `${n} в долгом ящике`, en: (n) => `${n} in the long box` },
   "Новая колода": { en: "New deck" },
+  "Добавить цитату": { en: "Add quote" },
   "N активных · N всего": { ru: (a, b) => `${a} активных · ${b} всего`, en: (a, b) => `${a} active · ${b} total` },
   "Удалить?": { en: "Delete?" },
   "Разбить на карточки": { en: "Split into cards" },
@@ -3143,7 +3144,19 @@ function useQuotes() {
     [quotes, persist]
   );
 
-  return { quotes, setItems, addFromSelection, refresh };
+  // Manual creation from the "Мои цитаты" dashboard's own "Добавить
+  // цитату" button, as opposed to addFromSelection's capture-from-anywhere
+  // flow — same resulting shape either way.
+  const addQuote = useCallback(
+    (front, back) => {
+      const trimmedFront = (front || "").trim();
+      if (!trimmedFront) return;
+      persist([...quotes, { id: uid(), front: trimmedFront, back: (back || "").trim(), status: "active", createdAt: Date.now() }]);
+    },
+    [quotes, persist]
+  );
+
+  return { quotes, setItems, addFromSelection, addQuote, refresh };
 }
 
 // The id of the always-present, undeletable "Все цитаты" deck — it isn't a
@@ -7620,11 +7633,12 @@ function QuoteDeckRow({ id, name, Icon, iconColor, ids, quotes, onOpen, isEditin
 // permanent "Все цитаты" deck (every quote, always — nothing to create or
 // delete), then whatever named decks exist. Every deck row (Все цитаты
 // included) is the same fixed height regardless of name length.
-function QuotesDashboard({ quotes, quoteDecks, onOpen, allQuotesName, onRenameAllQuotes }) {
+function QuotesDashboard({ quotes, quoteDecks, onOpen, allQuotesName, onRenameAllQuotes, onAddQuote }) {
   const PALETTE = useTheme();
   const t = useT();
   const [creating, setCreating] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [addingQuote, setAddingQuote] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState("");
 
@@ -7700,11 +7714,34 @@ function QuotesDashboard({ quotes, quoteDecks, onOpen, allQuotesName, onRenameAl
             <X size={16} />
           </button>
         </div>
+      ) : addingQuote ? (
+        <QuoteForm
+          onSave={({ front, back }) => {
+            onAddQuote(front, back);
+            setAddingQuote(false);
+          }}
+          onCancel={() => setAddingQuote(false)}
+        />
       ) : (
-        <button onClick={() => setCreating(true)} className="w-full px-4 py-4 flex items-center gap-4" style={blockStyle}>
-          <Plus size={20} style={{ color: PALETTE.mustard }} className="shrink-0" />
-          <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.95rem" }}>{t("Новая колода")}</span>
-        </button>
+        // Same block split in half — left half keeps the original
+        // "New deck" action, right half is the new "Add quote" action —
+        // rather than two separate rows, per the explicit request to
+        // split this one button in two, not add a second one.
+        <div className="w-full flex items-stretch" style={blockStyle}>
+          <button onClick={() => setCreating(true)} className="flex-1 min-w-0 px-4 py-4 flex items-center gap-3">
+            <Plus size={20} style={{ color: PALETTE.mustard }} className="shrink-0" />
+            <span className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.95rem" }}>
+              {t("Новая колода")}
+            </span>
+          </button>
+          <span className="shrink-0 self-stretch" style={{ width: "1px", margin: "12px 0", background: PALETTE.cardEdge }} />
+          <button onClick={() => setAddingQuote(true)} className="flex-1 min-w-0 px-4 py-4 flex items-center gap-3">
+            <Quote size={20} style={{ color: PALETTE.mustard }} className="shrink-0" />
+            <span className="truncate" style={{ fontFamily: "'IBM Plex Sans', sans-serif", color: PALETTE.fadeText, fontSize: "0.95rem" }}>
+              {t("Добавить цитату")}
+            </span>
+          </button>
+        </div>
       )}
 
       <QuoteDeckRow
@@ -8311,6 +8348,7 @@ function AppInner() {
                 onOpen={setOpenQuoteDeckId}
                 allQuotesName={allQuotesName}
                 onRenameAllQuotes={renameAllQuotes}
+                onAddQuote={quotes.addQuote}
               />
             ) : mode === "specs" ? (
               <SpecsList
