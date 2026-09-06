@@ -700,8 +700,18 @@ function useDecks() {
   return { decks, setDeckItems, addDeck, renameDeck, deleteDeck, refresh };
 }
 
+// Multipliers on the front word's base size (itself already 1.5rem/2rem
+// depending on length) — index 1 reproduces the exact original size, so
+// any caller that doesn't pass wordFontStep (Atoms, Слово — IndexCard is
+// shared with them too) renders identically to before this control
+// existed. The extra headroom above 1x (vs. room below) matches why this
+// was asked for: a small Arabic letter's diacritics need to become
+// clearly readable, not just a little bigger.
+const LANGUAGE_WORD_FONT_SCALE = [0.85, 1, 1.2, 1.45, 1.75, 2.1];
+const LANGUAGE_WORD_FONT_STEP_DEFAULT = 1;
+
 // ---- Card: tap (native onClick) flips it, touch-drag upward sends it to the long box ----
-function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp, reversed }) {
+function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipeUp, reversed, wordFontStep }) {
   const PALETTE = useTheme();
   const t = useT();
   const showEnglishSide = reversed ? flipped : !flipped;
@@ -842,7 +852,7 @@ function IndexCard({ item, flipped, onFlip, rotation, showTranscription, onSwipe
               style={{
                 fontFamily: "'Fraunces', serif",
                 color: PALETTE.ink,
-                fontSize: item.en.length > 40 ? "1.5rem" : "2rem",
+                fontSize: `${(item.en.length > 40 ? 1.5 : 2) * LANGUAGE_WORD_FONT_SCALE[wordFontStep ?? LANGUAGE_WORD_FONT_STEP_DEFAULT]}rem`,
                 fontWeight: 500,
                 lineHeight: 1.3,
               }}
@@ -984,7 +994,11 @@ function CardForm({ initial, onSave, onCancel, saveLabel }) {
 
 // `resetScopeName`, when provided (Focus mode only), shows a "reset all
 // active back to waiting" button scoped to the whole current goal tree.
-function PracticeView({ deck, resetScopeName, deckKey }) {
+// `wordFontStep`/`onWordFontStepChange`, when provided (Изучение языка
+// only — GoalHome/Focus never passes these), show the front-word font
+// size control and apply it to IndexCard; omitted entirely elsewhere so
+// Focus/Atoms/Слово keep rendering at their original, unscaled size.
+function PracticeView({ deck, resetScopeName, deckKey, wordFontStep, onWordFontStepChange }) {
   const PALETTE = useTheme();
   const t = useT();
   const activeItems = deck.items.filter((i) => i.status === "active");
@@ -1130,6 +1144,28 @@ function PracticeView({ deck, resetScopeName, deckKey }) {
           >
             <Type size={14} /> {t("транскрипция")}
           </button>
+          {onWordFontStepChange && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => onWordFontStepChange((s) => Math.max(0, s - 1))}
+                title={t("Уменьшить размер шрифта")}
+                aria-label={t("Уменьшить размер шрифта")}
+                className="flex items-center justify-center w-7 h-7 rounded-full shrink-0"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+              >
+                <Minus size={13} />
+              </button>
+              <button
+                onClick={() => onWordFontStepChange((s) => Math.min(LANGUAGE_WORD_FONT_SCALE.length - 1, s + 1))}
+                title={t("Увеличить размер шрифта")}
+                aria-label={t("Увеличить размер шрифта")}
+                className="flex items-center justify-center w-7 h-7 rounded-full shrink-0"
+                style={{ background: PALETTE.chip, color: PALETTE.fadeText }}
+              >
+                <Plus size={13} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1146,6 +1182,7 @@ function PracticeView({ deck, resetScopeName, deckKey }) {
             showTranscription={showTranscription}
             onSwipeUp={moveCurrentToWaiting}
             reversed={reversed}
+            wordFontStep={wordFontStep}
           />
 
           <div className="flex items-center gap-6 mt-10">
@@ -1458,7 +1495,7 @@ function BulkAddForm({ onAdd, onDone, doneLabel }) {
   );
 }
 
-function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onToggleTheme }) {
+function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onToggleTheme, wordFontStep, onWordFontStepChange }) {
   const PALETTE = useTheme();
   const t = useT();
   const [tab, setTab] = useState("practice");
@@ -1561,7 +1598,9 @@ function DeckHome({ deckId, title, deck, onBack, onRename, onDelete, isDark, onT
         </div>
       </div>
 
-      {tab === "practice" && <PracticeView deck={deck} deckKey={deckId} />}
+      {tab === "practice" && (
+        <PracticeView deck={deck} deckKey={deckId} wordFontStep={wordFontStep} onWordFontStepChange={onWordFontStepChange} />
+      )}
       {tab === "list" && <ListView deck={deck} />}
       {tab === "add" && <BulkAddForm onAdd={(items) => deck.setItems([...deck.items, ...items])} onDone={() => setTab("list")} />}
 
@@ -7955,6 +7994,10 @@ function AppInner() {
   // ALL_QUOTES_DECK_ID above), so its rename support needs its own single
   // persisted string instead of living in quote-decks-v1 like a real deck.
   const [allQuotesName, setAllQuotesNameRaw] = useState("");
+  // One value for the whole Изучение языка section (every deck, every
+  // card) — not per-deck — so it lives here at the app root rather than
+  // inside DeckHome/PracticeView, which remount per deck.
+  const [wordFontStep, setWordFontStepRaw] = useState(LANGUAGE_WORD_FONT_STEP_DEFAULT);
   const navRestored = useRef(false);
 
   useEffect(() => {
@@ -7988,6 +8031,11 @@ function AppInner() {
       try {
         const res = await window.storage.get("quotes-all-name-v1", false);
         if (!cancelled && res && typeof res.value === "string") setAllQuotesNameRaw(res.value);
+      } catch (e) {}
+      try {
+        const res = await window.storage.get("language-word-font-step-v1", false);
+        const parsed = res && Number(res.value);
+        if (!cancelled && Number.isInteger(parsed) && parsed >= 0 && parsed < LANGUAGE_WORD_FONT_SCALE.length) setWordFontStepRaw(parsed);
       } catch (e) {}
       // Restores exactly which item was open (deck/goal/prayer/text/etc.)
       // so a reload — pull-to-refresh, a manual browser refresh, or the PWA
@@ -8078,6 +8126,14 @@ function AppInner() {
     if (!trimmed) return;
     setAllQuotesNameRaw(trimmed);
     window.storage.set("quotes-all-name-v1", trimmed, false).catch(() => {});
+  }, []);
+
+  const setWordFontStep = useCallback((next) => {
+    setWordFontStepRaw((prev) => {
+      const value = Math.max(0, Math.min(LANGUAGE_WORD_FONT_SCALE.length - 1, typeof next === "function" ? next(prev) : next));
+      window.storage.set("language-word-font-step-v1", String(value), false).catch(() => {});
+      return value;
+    });
   }, []);
 
   const toggleLanguage = useCallback(() => {
@@ -8247,6 +8303,8 @@ function AppInner() {
             }}
             isDark={isDark}
             onToggleTheme={toggleTheme}
+            wordFontStep={wordFontStep}
+            onWordFontStepChange={setWordFontStep}
           />
         ) : mode === "focus" && openGoal ? (
           <GoalHome
